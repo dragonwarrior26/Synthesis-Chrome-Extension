@@ -1,135 +1,74 @@
-# Turborepo starter
+# Synthesis - Intelligent Tab Manager
 
-This Turborepo starter is maintained by the Turborepo core team.
+> Transform tab chaos into structured knowledge. An AI-powered Chrome Extension that synthesizes open tabs into comparison tables and summaries.
 
-## Using this example
+## 🎯 The Problem
 
-Run the following command:
+Modern web browsing suffers from **"Tab Overload"**. Users open dozens of tabs while researching (buying a laptop, planning a trip, writing a paper), leading to:
+- **Context Loss**: Forgetting why a tab was opened
+- **Manual Synthesis**: Copy-pasting data into spreadsheets
+- **Decision Paralysis**: Too many options, no structure
 
-```sh
-npx create-turbo@latest
-```
+## 💡 The Solution
 
-## What's inside?
+**Synthesis** is not just a tab manager—it's a **Research Assistant** powered by **Gemini 2.5 Flash**. It:
 
-This Turborepo includes the following packages/apps:
+1. **Auto-Detects Intent**: Analyzes your tabs and identifies clusters (e.g., "Gaming Laptops")
+2. **Generates Comparison Tables**: Extracts structured data (Price, RAM, GPU) from product pages automatically
+3. **Creates Topic Summaries**: Combines insights from multiple articles into cohesive narratives
+4. **Offers Contextual Chat**: Ask questions about your tabs: *"Which laptop has the best battery life?"*
 
-### Apps and Packages
+## 🏗️ Architecture (FAANG-Level)
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
+This project follows **Hexagonal Architecture** principles with a **Monorepo** structure:
 
 ```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+synthesis/
+├── apps/
+│   └── extension/          # Chrome Extension (Manifest V3)
+├── packages/
+│   ├── core/               # Business Logic (Synthesis, Extraction)
+│   └── ui/                 # Shared Design System (Shadcn/UI)
 ```
 
-You can build a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+### Tech Stack
+- **Framework**: React + TypeScript (Strict Mode)
+- **Build**: Vite + CRXJS + Turborepo
+- **UI**: Shadcn/UI + TailwindCSS v4
+- **AI**: Google Gemini 2.5 Flash
+- **Quality**: Husky + Lint-staged + ESLint + Prettier
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
+## 🚀 Development
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
+```bash
+# Install dependencies
+pnpm install
 
-### Develop
+# Run dev server (with HMR)
+pnpm dev
 
-To develop all apps and packages, run the following command:
+# Build for production
+pnpm build
 
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
+# Lint
+pnpm lint
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters):
+## 📦 Project Status
 
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
+**Current Sprint**: Sprint 1 ✅ Complete  
+**Next Sprint**: Sprint 2 (Content Extraction) 🚧 In Progress
 
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+### Roadmap
+- ✅ **Sprint 1**: Foundation (Monorepo, Chrome Extension, Shadcn/UI)
+- 🚧 **Sprint 2**: Content Extraction (Readability.js, Tab Management)
+- ⏳ **Sprint 3**: Intelligence (Gemini 2.5 Flash Integration)
+- ⏳ **Sprint 4**: User Interface (Comparison Tables, Chat)
 
-### Remote Caching
+## 📄 License
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+MIT
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+---
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo login
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo link
-
-# Without [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation), use your package manager
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.com/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.com/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.com/docs/reference/configuration)
-- [CLI Usage](https://turborepo.com/docs/reference/command-line-reference)
+**Built with AI-Assisted Development** 🤖
