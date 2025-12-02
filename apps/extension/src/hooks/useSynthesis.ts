@@ -46,12 +46,42 @@ export function useSynthesis() {
         }
     }
 
+    const [tableData, setTableData] = useState<{ columns: any[]; data: any[] } | null>(null)
+
+    const synthesizeTable = async (tabs: ExtractedContent[]) => {
+        if (!apiKey) {
+            setError('Please enter your Gemini API Key')
+            return
+        }
+
+        setIsSynthesizing(true)
+        setError(null)
+        setTableData(null)
+
+        try {
+            const service = new GeminiService(apiKey)
+            const result = await service.synthesizeJSON(tabs)
+            if (result && result.columns && result.data) {
+                setTableData(result)
+            } else {
+                throw new Error('Invalid data format received')
+            }
+        } catch (err) {
+            console.error('Table synthesis error:', err)
+            setError((err as Error).message || 'Failed to generate table')
+        } finally {
+            setIsSynthesizing(false)
+        }
+    }
+
     return {
         apiKey,
         saveApiKey,
         isSynthesizing,
         result,
+        tableData,
         error,
         synthesizeTabs,
+        synthesizeTable,
     }
 }

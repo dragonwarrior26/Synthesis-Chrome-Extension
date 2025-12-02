@@ -33,6 +33,53 @@ export class GeminiService {
         return streamGenerator()
     }
 
+    async synthesizeJSON(tabs: ExtractedContent[], query?: string): Promise<any> {
+        const prompt = this.buildJsonPrompt(tabs, query)
+        const result = await this.model.generateContent(prompt)
+        const text = result.response.text()
+        try {
+            // Clean up markdown code blocks if present
+            const jsonStr = text.replace(/```json\n|\n```/g, '').trim()
+            return JSON.parse(jsonStr)
+        } catch (e) {
+            console.error('Failed to parse JSON', e)
+            return null
+        }
+    }
+
+    private buildJsonPrompt(tabs: ExtractedContent[], query?: string): string {
+        const context = tabs.map((tab, index) => `
+---
+Tab ${index + 1}: ${tab.title}
+URL: ${tab.siteName || 'Unknown'}
+Content:
+${tab.textContent.slice(0, 10000)}
+---
+`).join('\n')
+
+        return `
+You are "Synthesis", an expert Research Agent.
+Your goal is to synthesize the information from the provided tabs into a structured JSON format for a comparison table.
+
+User Query: ${query || "Compare these items."}
+
+Context:
+${context}
+
+Instructions:
+1. Identify the common topic.
+2. Extract key attributes for comparison (e.g., Price, Rating, Specs).
+3. Return a JSON object with the following structure:
+{
+  "topic": "Topic Name",
+  "columns": [{"accessorKey": "key", "header": "Label"}],
+  "data": [{"key": "value", "productName": "Name"}]
+}
+4. Ensure "productName" (or similar identifier) is the first column.
+5. Return ONLY valid JSON.
+`
+    }
+
     private buildPrompt(tabs: ExtractedContent[], query?: string): string {
         const context = tabs.map((tab, index) => `
 ---
