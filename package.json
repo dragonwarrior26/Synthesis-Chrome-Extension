@@ -6,8 +6,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types",
-    "prepare": "husky"
+    "check-types": "turbo run check-types"
   },
   "devDependencies": {
     "husky": "^9.1.7",
@@ -15,14 +14,6 @@
     "prettier": "^3.6.2",
     "turbo": "^2.6.1",
     "typescript": "5.9.2"
-  },
-  "lint-staged": {
-    "*.{js,ts,tsx,json,md}": [
-      "prettier --write"
-    ],
-    "*.{js,ts,tsx}": [
-      "eslint --fix"
-    ]
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {

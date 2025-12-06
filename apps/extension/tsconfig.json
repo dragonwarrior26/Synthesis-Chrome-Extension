@@ -11,9 +11,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
-    },
-    "skipLibCheck": true
-  },
-  "exclude": ["**/*.test.ts", "**/*.test.tsx", "src/setupTests.ts"]
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  }
 }

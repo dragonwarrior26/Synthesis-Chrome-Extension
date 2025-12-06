@@ -1,27 +1,41 @@
 import { useState, useRef, useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { Button } from "@/components/ui/button";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { LoadingDots } from "@/components/LoadingDots";
 import { useTabManager } from "@/hooks/useTabManager";
-import { useSynthesis } from "@/hooks/useSynthesis";
+import { useSynthesis, type SynthesisMode } from "@/hooks/useSynthesis";
+import { type ExtractedContent } from "@synthesis/core";
 import {
   Settings,
   FileText,
   CheckCircle2,
+  Loader2,
+  Table,
+  Lightbulb,
+  BarChart3,
+  FileBarChart,
   Search,
-  List,
-  LayoutGrid,
-  Menu,
+  Mic,
+  Send,
+  Sparkles
 } from "lucide-react";
 import "./index.css";
 
 function SidePanel() {
-  const { activeTabs, extractedData, isExtracting, extractAll } =
-    useTabManager();
-  const { apiKey, saveApiKey, result, synthesizeTabs, synthesizeTable } =
-    useSynthesis();
+  const { activeTabs, extractedData, isExtracting, extractAll } = useTabManager();
+  const { apiKey, saveApiKey, performSynthesis, isSynthesizing } = useSynthesis();
+
   const [showSettings, setShowSettings] = useState(!apiKey);
   const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<
+    { role: "user" | "assistant"; content: string; isError?: boolean }[]
+  >([]);
+  const [activeSourceTab, setActiveSourceTab] = useState<"search" | "sources">("search");
+
+  // Ref for auto-scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -29,183 +43,327 @@ function SidePanel() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [result]);
+  }, [chatMessages, isSynthesizing]);
 
-  const handleSynthesize = (mode: "summary" | "table") => {
-    const tabsToSynthesize = activeTabs
+  const getExtractedTabs = (): ExtractedContent[] => {
+    return activeTabs
       .map((tab) => extractedData[tab.id])
-      .filter(Boolean);
+      .filter(Boolean) as ExtractedContent[];
+  };
 
-    if (tabsToSynthesize.length === 0) return;
+  const handleAction = async (input: string, mode?: SynthesisMode) => {
+    if (!apiKey || isSynthesizing) return;
 
-    if (mode === "summary") {
-      synthesizeTabs(tabsToSynthesize);
-    } else {
-      synthesizeTable(tabsToSynthesize);
+    const tabsToQuery = getExtractedTabs();
+    if (tabsToQuery.length === 0) {
+      setChatMessages(prev => [...prev, {
+        role: "assistant",
+        content: "Please **Sync Content** first before asking questions."
+      }]);
+      return;
+    }
+
+    // Add user message
+    setChatMessages((prev) => [...prev, { role: "user", content: input }]);
+    setChatInput("");
+
+    // Add placeholder assistant message
+    setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    try {
+      // Stream content into the last message
+      await performSynthesis(
+        tabsToQuery,
+        mode || 'chat', // Default to 'chat' mode for user input
+        mode ? undefined : input, // If mode is generic chat, pass input as query
+        (chunk) => {
+          setChatMessages((prev) => {
+            const newHistory = [...prev];
+            const lastMsg = newHistory[newHistory.length - 1];
+            if (lastMsg.role === "assistant") {
+              lastMsg.content += chunk;
+            }
+            return newHistory;
+          });
+        },
+        chatMessages // Pass full history
+          .filter(m => !m.isError && m.content) // Filter out errors and empty msgs
+          .map(m => ({ role: m.role, content: m.content }))
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      setChatMessages((prev) => {
+        const newHistory = [...prev];
+        const lastMsg = newHistory[newHistory.length - 1];
+        lastMsg.content = `**Error**: ${errorMessage}\n\n*Check console for details.*`;
+        lastMsg.isError = true;
+        return newHistory;
+      });
+    }
+  };
+
+  const handleChatSubmit = () => {
+    if (!chatInput.trim()) return;
+    handleAction(chatInput.trim());
+  };
+
+  const handleSynthesisChip = (mode: SynthesisMode) => {
+    const promptMap: Record<SynthesisMode, string> = {
+      summary: "Create a visual summary of this content.",
+      table: "Create a detailed comparison chart.",
+      proscons: "Analyze pros and cons with bullet points.",
+      insights: "Provide deeper insights and specific key findings.",
+      chat: "Let's discuss this."
+    };
+    // Display the specific label as the user message
+    handleAction(promptMap[mode], mode);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleChatSubmit();
     }
   };
 
   const extractedCount = Object.keys(extractedData).length;
 
+
+  const handleRetry = () => {
+    // Find the last user message to retry
+    const lastUserMsg = [...chatMessages].reverse().find(m => m.role === "user");
+    if (lastUserMsg) {
+      // Remove the error message
+      setChatMessages(prev => prev.filter(m => !m.isError));
+      handleAction(lastUserMsg.content);
+    }
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground font-sans">
-      {/* Top Navigation Bar (Mocked to match screenshot) */}
-      <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
-        <div className="flex gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-slate-300"></div>
-          <div className="w-3 h-3 rounded-full bg-slate-300"></div>
-          <div className="w-3 h-3 rounded-full bg-slate-300"></div>
-        </div>
-      </div>
+    <div className="h-screen flex flex-col bg-slate-950 font-sans text-slate-50 selection:bg-blue-500/30">
+      {/* Header */}
+      <header className="flex items-center justify-between px-5 py-4 bg-slate-950 border-b border-slate-900 sticky top-0 z-20">
+        <h1 className="text-base font-semibold tracking-tight text-slate-50 flex items-center gap-2">
+          AI Research Assistant
+        </h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShowSettings(!showSettings)}
+          className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+        >
+          <Settings className="w-4 h-4" />
+        </Button>
+      </header>
 
-      <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
-        <div className="h-8 bg-slate-50 rounded-full w-full max-w-[200px]"></div>
-        <div className="flex gap-3 text-muted-foreground">
-          <LayoutGrid className="w-5 h-5" />
-          <Menu className="w-5 h-5" />
-        </div>
-      </div>
+      {/* Main Content */}
+      <div
+        className="flex-1 overflow-auto p-5 space-y-8 scroll-smooth pb-32"
+        ref={scrollContainerRef}
+      >
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-3 animate-in fade-in slide-in-from-top-2">
+            <label className="text-xs uppercase tracking-wider font-bold text-slate-500">API Key</label>
+            <input
+              type="password"
+              defaultValue={apiKey || ""}
+              className="w-full p-2.5 text-sm rounded-lg border border-slate-800 bg-slate-950 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none text-slate-200 placeholder:text-slate-600"
+              placeholder="Enter your API Key..."
+              onChange={(e) => saveApiKey(e.target.value)}
+            />
+          </div>
+        )}
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar (Mocked thin strip) */}
-        <div className="w-12 border-r flex flex-col items-center py-4 gap-6 text-muted-foreground">
-          <Search className="w-5 h-5" />
-        </div>
+        {/* Section 1: Sources & Extraction */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-slate-400">Sources & Extraction</h2>
+          </div>
 
-        {/* Right Panel - The Actual Extension UI */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white">
-          {/* Header */}
-          <header className="flex items-center justify-between p-4 border-b">
-            <h1 className="text-lg font-semibold text-slate-900">
-              Research Assistant
-            </h1>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowSettings(!showSettings)}
-            >
-              {showSettings ? (
-                <Settings className="w-5 h-5 text-slate-400" />
+          <div className="bg-slate-900 rounded-xl border border-slate-800 p-1 overflow-hidden">
+            {/* Tabs */}
+            <div className="flex items-center border-b border-slate-800 mb-3 px-2">
+              <button
+                onClick={() => setActiveSourceTab('search')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${activeSourceTab === 'search' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
+              >
+                Google Search
+              </button>
+              <button
+                onClick={() => setActiveSourceTab('sources')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${activeSourceTab === 'sources' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
+              >
+                Sources
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            <div className="px-3 pb-3">
+              {extractedCount === 0 && !isExtracting ? (
+                <div className="flex items-center gap-3 py-2">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                    <Search className="w-4 h-4 text-slate-500" />
+                  </div>
+                  <span className="text-sm text-slate-400">No content synced yet.</span>
+                </div>
               ) : (
-                <List className="w-5 h-5 text-slate-400" />
+                <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
+                  {activeTabs.map(tab => (
+                    <div key={tab.id} className="flex items-center gap-3">
+                      {tab.favIconUrl ? (
+                        <img
+                          src={tab.favIconUrl}
+                          className="rounded-sm opacity-80"
+                          style={{ width: '16px', height: '16px', minWidth: '16px' }}
+                        />
+                      ) : <FileText className="w-4 h-4 text-slate-600" />}
+                      <span className="text-sm text-slate-300 truncate flex-1">{tab.title}</span>
+                      {extractedData[tab.id] && <CheckCircle2 className="w-4 h-4 text-blue-500" />}
+                    </div>
+                  ))}
+                </div>
               )}
-            </Button>
-          </header>
 
-          <div className="flex-1 overflow-auto p-4 space-y-6">
-            {/* Settings (Conditional) */}
-            {showSettings && (
-              <div className="p-4 bg-slate-50 rounded-lg border space-y-3 mb-4">
-                <label className="text-sm font-medium">Gemini API Key</label>
-                <input
-                  type="password"
-                  defaultValue={apiKey || ""}
-                  className="w-full p-2 text-sm rounded border focus:ring-2 focus:ring-primary/20 outline-none"
-                  placeholder="Enter API Key"
-                  onChange={(e) => saveApiKey(e.target.value)}
-                />
-              </div>
-            )}
-
-            {/* Primary Actions */}
-            <div className="space-y-3">
               <Button
                 onClick={extractAll}
                 disabled={isExtracting}
-                className="w-full bg-primary hover:bg-primary/90 text-white h-10 text-base font-medium shadow-sm"
+                className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
               >
-                {isExtracting ? "Extracting..." : "1. Extract Content"}
+                {isExtracting ? (
+                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</span>
+                ) : "Sync Content"}
               </Button>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => handleSynthesize("summary")}
-                  disabled={extractedCount === 0}
-                  className="h-10 bg-white hover:bg-slate-50 text-slate-700 border-slate-200 font-normal"
-                >
-                  2. Summarize
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={true} // Placeholder for "Ask" flow
-                  className="h-10 bg-white hover:bg-slate-50 text-slate-700 border-slate-200 font-normal"
-                >
-                  3. Ask
-                </Button>
-              </div>
             </div>
-
-            {/* Extracted Links List */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-slate-900">
-                Links Extracted
-              </h3>
-              <div className="space-y-4">
-                {activeTabs.map((tab) => (
-                  <div key={tab.id} className="flex gap-3">
-                    <div className="shrink-0 mt-0.5">
-                      <FileText className="w-5 h-5 text-slate-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-medium text-slate-900 truncate">
-                          {tab.title}
-                        </span>
-                      </div>
-
-                      {extractedData[tab.id] ? (
-                        <div className="flex items-center gap-1.5 mt-0.5 text-green-600">
-                          <CheckCircle2 className="w-3.5 h-3.5 fill-green-600 text-white" />
-                          <span className="text-xs font-medium">Extracted</span>
-                        </div>
-                      ) : tab.status === "extracting" ? (
-                        <div className="text-xs text-primary mt-0.5">
-                          Extracting...
-                        </div>
-                      ) : (
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          Ready to extract
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Summary Section */}
-            {result && (
-              <div className="space-y-2 pt-2">
-                <h3 className="text-sm font-medium text-slate-900">Summary</h3>
-                <div className="text-sm text-slate-600 leading-relaxed">
-                  {result}
-                </div>
-                <div ref={messagesEndRef} />
-              </div>
-            )}
           </div>
+        </div>
 
-          {/* Bottom Chat Input */}
-          <div className="p-4 border-t bg-white">
-            <div className="relative">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask anything about the documents..."
-                className="w-full pl-4 pr-20 py-3 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 shadow-sm placeholder:text-slate-400"
-              />
-              <div className="absolute right-1.5 top-1.5">
-                <Button
-                  size="sm"
-                  className="h-8 px-4 bg-primary hover:bg-primary/90 text-white font-medium rounded-md"
-                >
-                  Send
-                </Button>
-              </div>
+        {/* Section 2: Analytics & Insights */}
+        {extractedCount > 0 && (
+          <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-500">
+            <h2 className="text-sm font-medium text-slate-400">Analytics & Insights</h2>
+            <div className="grid grid-cols-2 gap-3">
+              {/* Summary Card */}
+              <button
+                onClick={() => handleSynthesisChip('summary')}
+                className="flex flex-col items-start p-4 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-all text-left group"
+              >
+                <div className="p-2 mb-3 rounded-lg bg-blue-500/10 text-blue-400 group-hover:bg-blue-500/20 transition-colors">
+                  <FileBarChart className="w-5 h-5" />
+                </div>
+                <span className="text-sm font-semibold text-slate-200">Summary</span>
+                <span className="text-xs text-slate-500 mt-1">(Visualized)</span>
+              </button>
+
+              {/* Comparison Card */}
+              <button
+                onClick={() => handleSynthesisChip('table')}
+                className="flex flex-col items-start p-4 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-all text-left group"
+              >
+                <div className="p-2 mb-3 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 transition-colors">
+                  <BarChart3 className="w-5 h-5" />
+                </div>
+                <span className="text-sm font-semibold text-slate-200">Comparison</span>
+                <span className="text-xs text-slate-500 mt-1">(Charts)</span>
+              </button>
+
+              {/* Pros/Cons Card */}
+              <button
+                onClick={() => handleSynthesisChip('proscons')}
+                className="flex flex-col items-start p-4 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-all text-left group"
+              >
+                <div className="p-2 mb-3 rounded-lg bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500/20 transition-colors">
+                  <Table className="w-5 h-5" />
+                </div>
+                <span className="text-sm font-semibold text-slate-200">Pros/Cons</span>
+                <span className="text-xs text-slate-500 mt-1">(Bullet Points)</span>
+              </button>
+
+              {/* Insights Card */}
+              <button
+                onClick={() => handleSynthesisChip('insights')}
+                className="flex flex-col items-start p-4 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-all text-left group"
+              >
+                <div className="p-2 mb-3 rounded-lg bg-amber-500/10 text-amber-400 group-hover:bg-amber-500/20 transition-colors">
+                  <Lightbulb className="w-5 h-5" />
+                </div>
+                <span className="text-sm font-semibold text-slate-200">Deeper Insights</span>
+                <span className="text-xs text-slate-500 mt-1">(Key Findings)</span>
+              </button>
             </div>
+          </div>
+        )}
+
+        {/* Chat Stream */}
+        <div className="space-y-6 pb-20">
+          {chatMessages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+            >
+              {msg.role === "user" ? (
+                <div className="bg-blue-600 text-white px-5 py-3 rounded-2xl rounded-tr-sm shadow-md text-sm max-w-[90%]">
+                  {msg.content}
+                </div>
+              ) : (
+                <div className={`text-sm leading-relaxed max-w-full w-full ${msg.isError ? "bg-red-900/20 border-l-4 border-red-500 p-4 text-red-200" : "bg-slate-900/50 p-0 text-slate-300"}`}>
+                  {!msg.content && i === chatMessages.length - 1 && isSynthesizing ? (
+                    <LoadingDots text="Analyzing..." />
+                  ) : (
+                    <MarkdownRenderer
+                      content={msg.content}
+                      isStreaming={i === chatMessages.length - 1 && isSynthesizing}
+                      className="text-slate-300"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Retry Button */}
+              {msg.isError && i === chatMessages.length - 1 && (
+                <button
+                  onClick={handleRetry}
+                  className="mt-2 text-xs font-medium text-red-400 hover:text-red-300 flex items-center gap-1 transition-all"
+                >
+                  <Sparkles className="w-3 h-3" /> Retry
+                </button>
+              )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Floating Deep Dive Input */}
+      <div className="fixed bottom-4 left-4 right-4 z-50">
+        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl p-1.5 flex flex-col gap-1 transition-all hover:bg-slate-900 ring-1 ring-white/5">
+          <div className="px-3 pt-2 text-[10px] uppercase font-bold text-slate-500 flex items-center gap-2">
+            <Search className="w-3 h-3" /> Deep Dive Analyst
+          </div>
+          <div className="flex items-center gap-2 px-1 pb-1">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask deeper questions, analyze across sources..."
+              className="flex-1 bg-transparent border-0 text-slate-200 placeholder:text-slate-600 focus:ring-0 text-sm h-10 px-2 font-medium"
+              disabled={!apiKey || extractedCount === 0 || isSynthesizing}
+            />
+            {extractedCount === 0 ? (
+              <div className="px-2 text-slate-600">
+                <Mic className="w-5 h-5 opacity-50" />
+              </div>
+            ) : (
+              <Button
+                onClick={handleChatSubmit}
+                disabled={!chatInput.trim() || !apiKey || isSynthesizing}
+                size="icon"
+                className="h-9 w-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-lg shadow-blue-900/20"
+              >
+                {isSynthesizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              </Button>
+            )}
           </div>
         </div>
       </div>

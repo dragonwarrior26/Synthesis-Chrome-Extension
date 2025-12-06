@@ -2,20 +2,11 @@
   "name": "@synthesis/core",
   "version": "0.0.1",
   "private": true,
-  "main": "./dist/index.js",
+  "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
-  "browser": "./dist/browser.mjs",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "browser": "./dist/browser.mjs",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
+  "types": "./dist/index.d.mts",
   "scripts": {
-    "build": "tsup src/index.ts src/browser.ts --format cjs,esm --dts",
+    "build": "tsup",
     "lint": "eslint .",
     "test": "vitest run"
   },

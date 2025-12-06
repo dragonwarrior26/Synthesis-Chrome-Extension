@@ -17,9 +17,7 @@ vi.mock("@/hooks/useSynthesis");
 describe("Smoke Test: Synthesis Extension UI Flow", () => {
   const mockExtractAll = vi.fn();
   const mockExtractFromTab = vi.fn();
-  const mockSynthesizeTabs = vi.fn();
-  const mockSynthesizeTable = vi.fn();
-  const mockSaveApiKey = vi.fn();
+  const mockPerformSynthesis = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -40,22 +38,18 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
       extractFromTab: mockExtractFromTab,
     });
 
-    vi.mocked(useSynthesisHook.useSynthesis).mockReturnValue({
+    vi.mocked(useSynthesisHook.useSynthesis as any).mockReturnValue({
       apiKey: "test-api-key",
-      saveApiKey: mockSaveApiKey,
+      saveApiKey: vi.fn(),
       isSynthesizing: false,
-      result: "",
-      tableData: null,
       error: null,
-      synthesizeTabs: mockSynthesizeTabs,
-      synthesizeTable: mockSynthesizeTable,
+      performSynthesis: mockPerformSynthesis,
     });
   });
 
-  it("F-01: Renders Side Panel and lists active tabs", () => {
+  it("F-01: Renders Side Panel with Research Assistant title", () => {
     render(<SidePanel />);
-    expect(screen.getByText("Test Tab")).toBeInTheDocument();
-    expect(screen.getByText("1 tabs")).toBeInTheDocument();
+    expect(screen.getByText("Research Assistant")).toBeInTheDocument();
   });
 
   it("E-02: Triggers extraction when button is clicked", () => {
@@ -91,55 +85,15 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
 
     render(<SidePanel />);
 
-    // Check if status shows "Extracted"
-    expect(screen.getByText("Extracted")).toBeInTheDocument();
-
-    // Click Summary
-    const summaryBtn = screen.getByText("Summary");
-    expect(summaryBtn).not.toBeDisabled();
-    fireEvent.click(summaryBtn);
-    expect(mockSynthesizeTabs).toHaveBeenCalled();
+    // Click Summarize button
+    const summarizeBtn = screen.getByText("Summarize");
+    expect(summarizeBtn).not.toBeDisabled();
+    fireEvent.click(summarizeBtn);
+    expect(mockPerformSynthesis).toHaveBeenCalled();
   });
 
-  it("U-01: Renders Comparison Table when data is available", () => {
-    // Mock table data state
-    vi.mocked(useTabManagerHook.useTabManager).mockReturnValue({
-      activeTabs: [{ id: 1, title: "Test Tab" } as any],
-      extractedData: { 1: { title: "Test Tab" } as any },
-      isExtracting: false,
-      extractAll: mockExtractAll,
-      extractFromTab: mockExtractFromTab,
-    });
-
-    vi.mocked(useSynthesisHook.useSynthesis).mockReturnValue({
-      apiKey: "test-api-key",
-      saveApiKey: mockSaveApiKey,
-      isSynthesizing: false,
-      result: "",
-      tableData: {
-        columns: [{ header: "Product", accessorKey: "product" }],
-        data: [{ product: "Laptop A" }],
-      },
-      error: null,
-      synthesizeTabs: mockSynthesizeTabs,
-      synthesizeTable: mockSynthesizeTable,
-    });
-
-    render(<SidePanel />);
-
-    // Switch to Table view
-    const compareBtn = screen.getByText("Compare");
-    fireEvent.click(compareBtn);
-
-    expect(mockSynthesizeTable).toHaveBeenCalled();
-
-    // Since viewMode is local state, clicking Compare sets it to 'table'.
-    // If tableData is present, it should render.
-    expect(screen.getByText("Laptop A")).toBeInTheDocument();
-  });
-
-  it("U-02: Renders Chat Interface", () => {
-    // Mock extracted state so buttons are enabled
+  it("U-01: All synthesis buttons are present", () => {
+    // Needs extracted data to show buttons
     vi.mocked(useTabManagerHook.useTabManager).mockReturnValue({
       activeTabs: [{ id: 1, title: "Test Tab" } as any],
       extractedData: { 1: { title: "Test Tab" } as any },
@@ -150,11 +104,16 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
 
     render(<SidePanel />);
 
-    const chatBtn = screen.getByText("Chat");
-    fireEvent.click(chatBtn);
+    // Check all buttons exist
+    expect(screen.getByText("Summarize")).toBeInTheDocument();
+    expect(screen.getByText("Compare")).toBeInTheDocument();
+    expect(screen.getByText("Pros/Cons")).toBeInTheDocument();
+    expect(screen.getByText("Insights")).toBeInTheDocument();
+  });
 
-    expect(
-      screen.getByPlaceholderText("Ask a question..."),
-    ).toBeInTheDocument();
+  it("U-02: Chat input placeholder states", () => {
+    render(<SidePanel />);
+    // Default state (no extraction)
+    expect(screen.getByPlaceholderText("Extract content to start...")).toBeInTheDocument();
   });
 });
