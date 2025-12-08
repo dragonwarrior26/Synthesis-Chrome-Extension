@@ -71,11 +71,17 @@ export function useTabManager() {
         setIsExtracting(false)
     }
 
+    const clearData = () => {
+        setExtractedData({})
+        setIsExtracting(false)
+    }
+
     return {
         activeTabs,
         extractedData,
         isExtracting,
         extractFromTab,
         extractAll,
+        clearData
     }
 }

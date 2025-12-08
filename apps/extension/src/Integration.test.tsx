@@ -36,6 +36,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,
+      clearData: vi.fn(),
     });
 
     vi.mocked(useSynthesisHook.useSynthesis as any).mockReturnValue({
@@ -81,6 +82,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,
+      clearData: vi.fn(),
     });
 
     render(<SidePanel />);
@@ -100,6 +102,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,
+      clearData: vi.fn(),
     });
 
     render(<SidePanel />);

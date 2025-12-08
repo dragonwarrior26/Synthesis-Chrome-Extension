@@ -24,9 +24,10 @@ export function useSynthesis() {
     const performSynthesis = useCallback(async (
         tabs: ExtractedContent[],
         mode: SynthesisMode,
-        userQuery: string | undefined,
-        onChunk: (chunk: string) => void,
-        chatHistory: { role: 'user' | 'assistant', content: string }[] = []
+        query?: string,
+        onStream?: (chunk: string) => void,
+        chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
+        imageData?: string
     ) => {
         if (!apiKey) {
             throw new Error('Please enter your Gemini API Key using the settings icon.')
@@ -37,9 +38,10 @@ export function useSynthesis() {
             throw new Error('Invalid API Key format. Gemini keys typically start with "AIza". Check your key.')
         }
 
-        // 2. Validate Content & Truncate
+        // 2. Validate Content & Truncate (Only if not asking a pure vision question, but let's keep it safe)
         const totalLength = tabs.reduce((acc, tab) => acc + (tab.textContent?.length || 0), 0);
-        if (totalLength < 10 && !userQuery) {
+        // If imageData is present, we permit empty text content (Vision mode)
+        if (totalLength < 10 && !query && !imageData) {
             throw new Error('Extracted content appears empty. Please try extracting correctly loaded pages.')
         }
 
@@ -64,13 +66,15 @@ export function useSynthesis() {
         setError(null)
 
         try {
-            const service = new GeminiService(apiKey)
-            // If userQuery is provided (Chat mode), we use that. 
-            // If not, we use the mode (Summary/Table etc) which has specific prompts in GeminiService
-            const stream = await service.synthesizeStream(processedTabs, userQuery, mode, chatHistory)
+            const gemini = new GeminiService(apiKey)
 
-            for await (const chunk of stream) {
-                onChunk(chunk)
+            if (onStream) {
+                const stream = await gemini.synthesizeStream(processedTabs, query, mode, chatHistory, imageData)
+                for await (const chunk of stream) {
+                    onStream(chunk)
+                }
+            } else {
+                await gemini.synthesize(processedTabs, query, mode, imageData)
             }
         } catch (err) {
             console.error('Synthesis error:', err)

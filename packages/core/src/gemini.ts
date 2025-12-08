@@ -16,8 +16,13 @@ export class GeminiService {
         this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
     }
 
-    async synthesize(tabs: ExtractedContent[], query?: string, mode: SynthesisMode = 'summary'): Promise<string> {
-        const prompt = this.buildPrompt(tabs, query, mode)
+    async synthesize(
+        tabs: ExtractedContent[],
+        query?: string,
+        mode: SynthesisMode = 'summary',
+        imageData?: string
+    ): Promise<string> {
+        const prompt = this.buildPrompt(tabs, query, mode, [], imageData)
         const result = await this.model.generateContent(prompt)
         return result.response.text()
     }
@@ -26,9 +31,10 @@ export class GeminiService {
         tabs: ExtractedContent[],
         query?: string,
         mode: SynthesisMode = 'summary',
-        chatHistory: { role: 'user' | 'assistant', content: string }[] = []
+        chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
+        imageData?: string
     ): Promise<AsyncGenerator<string>> {
-        const prompt = this.buildPrompt(tabs, query, mode, chatHistory)
+        const prompt = this.buildPrompt(tabs, query, mode, chatHistory, imageData)
         const result = await this.model.generateContentStream(prompt)
 
         async function* streamGenerator() {
@@ -39,8 +45,6 @@ export class GeminiService {
 
         return streamGenerator()
     }
-
-    // ... (synthesize method would need update too if used, but we stick to stream for now)
 
     async synthesizeJSON(tabs: ExtractedContent[], query?: string): Promise<any> {
         const prompt = this.buildJsonPrompt(tabs, query)
@@ -96,8 +100,9 @@ ${tab.textContent.slice(0, 10000)}
         tabs: ExtractedContent[],
         query?: string,
         mode: SynthesisMode = 'summary',
-        chatHistory: { role: 'user' | 'assistant', content: string }[] = []
-    ): string {
+        chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
+        imageData?: string
+    ): any[] {
         const context = this.buildContext(tabs)
 
         // Format history
@@ -109,137 +114,113 @@ ${tab.textContent.slice(0, 10000)}
             chat: `
 You are "Synthesis", an expert Research Assistant. You are having a conversation with the user about the provided content.
 
-User Query: ${query}
+Guidelines:
+1. Answer strictly based on the provided context (text or image).
+2. If the user asks for a comparison, ALWAYS use a Markdown Table.
+3. Be concise and professional.
+`,
+            summary: `
+You are "Synthesis". Create a **VISUAL** executive summary of the content.
+
+FORMAT RULES:
+1. Start with a 1-sentence **High Level Verdict**.
+2. **Key Specs/Features**: You MUST use a **Markdown Table** to display specifications or key features.
+3. **Key Takeaways**: Use a bulleted list with bold headers.
+4. Do NOT write long paragraphs. Block of text = BAD. Lists & Tables = GOOD.
+
+Structure:
+## Verdict
+[1 sentence verdict]
+
+## Key Data
+| Feature | Details |
+|---------|---------|
+| [Row]   | [Val]   |
+...
+
+## Key Takeaways
+*   **Point 1**: Detail...
+*   **Point 2**: Detail...
+`,
+            table: `
+You are "Synthesis". Your ONLY job is to create a detailed **Markdown Comparison Table**.
+
+Instructions:
+1. Identify the products/topics being compared.
+2. Extract comparable attributes (Price, Specs, Pros, Cons, Rating).
+3. Create a comprehensive Markdown table.
+4. Follow the table with a "Winner" section explaining the best choice.
+
+Output format:
+## Detailed Comparison
+[Markdown Table Here]
+
+## Recommendation
+**Winner**: [Product] because [reason].
+`,
+            proscons: `
+You are "Synthesis". Analyze the Pros and Cons.
+
+FORMAT RULES:
+1. Use a clear "Pros" and "Cons" section.
+2. Use bullet points only.
+
+Structure:
+## Pros
+*   [Pro 1]
+*   [Pro 2]
+
+## Cons
+*   [Con 1]
+*   [Con 2]
+
+## Trade-off Analysis
+(One sentence summary of the trade-offs)
+`,
+            insights: `
+You are "Synthesis". Dig deep and find non-obvious insights.
+
+FORMAT RULES:
+1. Do not summarize the obvious. Find the *implications*.
+2. Use **Bold Headers** for each insight.
+3. Use > Blockquotes for critical warnings or unique facts.
+
+Structure:
+## Deep Insights
+1. **[Insight Title]**: [Explanation]
+2. **[Insight Title]**: [Explanation]
+
+## Critical Warnings
+> [Warning or Limitation found in the text]
+`
+        };
+
+        const basePrompt = modePrompts[mode];
+
+        const textPart = `
+${basePrompt}
+
+User Query: ${query || "Summarize this content."}
 
 Previous Conversation History:
 ${historyStr}
 
 Context:
 ${context}
+`;
 
-Instructions:
-1. Answer the user's question directly and concisely based on the context.
-2. If the user refers to something said earlier (e.g. "what about that second option?"), look at the Conversation History.
-3. If the context does not contain the answer, use your general knowledge to answer, but mention that you are doing so.
-4. Be conversational and helpful. Do NOT act like a summarizer unless specifically asked to summarize.
-5. Provide specific details, numbers, and facts from the text where relevant.
+        const parts: any[] = [{ text: textPart }];
 
-IMPORTANT:
-- Use markdown for formatting (bold, lists).
-- Do NOT use emojis.
-`,
-            summary: `
-You are "Synthesis", an expert Research Agent. Analyze the provided content and create a well-structured summary.
-
-${query ? `User Question: ${query}` : ''}
-
-Context:
-${context}
-
-Instructions:
-1. Create a structured summary with clear sections
-2. Use markdown formatting with **bold** for emphasis
-3. If the context does not fully answer the user's request, you MAY use your general knowledge to supplement it, but prefer the context.
-4. Include these sections if relevant:
-   - **Overview**: Brief introduction to the topic
-   - **Key Features**: Main highlights and specifications
-   - **Pricing**: Price ranges and value analysis
-   - **Recommendation**: Your expert recommendation
-
-IMPORTANT:
-- Do NOT use any emojis
-- Use proper paragraphs with line breaks
-- Format prices with currency symbols
-- Be concise but comprehensive
-`,
-
-            table: `
-You are "Synthesis", an expert Research Agent. Create a detailed comparison table.
-
-${query ? `User Question: ${query}` : ''}
-
-Context:
-${context}
-
-Instructions:
-1. Identify all items/products being compared
-2. Create a markdown table with key comparison attributes
-3. Include columns for: Name, Price, Key Specs, Rating (if available), Pros, Cons
-4. Add a summary section below the table with your recommendation
-5. If specific data points (like Price) are missing in the context, use your general knowledge to estimate or state "N/A".
-
-Format:
-| Product | Price | Key Feature | Rating |
-|---------|-------|-------------|--------|
-| ... | ... | ... | ... |
-
-**Summary**: Your analysis of which option is best and why.
-
-IMPORTANT: Do NOT use any emojis. Use **bold** for emphasis.
-`,
-
-            proscons: `
-You are "Synthesis", an expert Research Agent. Analyze the pros and cons.
-
-${query ? `User Question: ${query}` : ''}
-
-Context:
-${context}
-
-Instructions:
-1. For each item/topic, identify clear pros and cons
-2. If the context is limited, use your general knowledge to identify standard pros/cons for this type of product/topic.
-3. Structure your response like this:
-
-## [Item/Topic Name]
-
-**Pros:**
-- First advantage
-- Second advantage
-- Third advantage
-
-**Cons:**
-- First disadvantage
-- Second disadvantage
-- Third disadvantage
-
-4. End with a **Verdict** section summarizing the best choice
-
-IMPORTANT: Do NOT use any emojis. Be objective and balanced.
-`,
-
-            insights: `
-You are "Synthesis", an expert Research Agent. Provide deep insights and analysis.
-
-${query ? `User Question: ${query}` : ''}
-
-Context:
-${context}
-
-Instructions:
-1. Go beyond surface-level information. Use your broad knowledge base to provide context not found in the text.
-2. Structure your response with:
-
-## Key Insights
-- Insight 1: [Detailed explanation]
-- Insight 2: [Detailed explanation]
-- Insight 3: [Detailed explanation]
-
-## Market Analysis
-Brief overview of how this compares to alternatives/competitors (Use general knowledge if needed).
-
-## Recommendations
-**Best for beginners**: [Option and why]
-**Best value**: [Option and why]
-**Premium choice**: [Option and why]
-
-## Things to Consider
-Important factors the user should think about before deciding
-
-IMPORTANT: Do NOT use any emojis. Use **bold** for key terms. Be analytical and thorough.
-`
+        if (imageData) {
+            parts.push({
+                inlineData: {
+                    mimeType: "image/jpeg",
+                    data: imageData
+                }
+            });
         }
 
-        return modePrompts[mode]
+        return parts;
     }
+
 }

@@ -18,12 +18,18 @@ import {
   Search,
   Mic,
   Send,
-  Sparkles
+  Sparkles,
+  RotateCcw,
+  Download,
+  Copy,
+  Eye,
+  EyeOff
 } from "lucide-react";
+import { ExportService } from "@/services/ExportService";
 import "./index.css";
 
 function SidePanel() {
-  const { activeTabs, extractedData, isExtracting, extractAll } = useTabManager();
+  const { activeTabs, extractedData, isExtracting, extractAll, clearData } = useTabManager();
   const { apiKey, saveApiKey, performSynthesis, isSynthesizing } = useSynthesis();
 
   const [showSettings, setShowSettings] = useState(!apiKey);
@@ -31,7 +37,7 @@ function SidePanel() {
   const [chatMessages, setChatMessages] = useState<
     { role: "user" | "assistant"; content: string; isError?: boolean }[]
   >([]);
-  const [activeSourceTab, setActiveSourceTab] = useState<"search" | "sources">("search");
+  const [activeSourceTab, setActiveSourceTab] = useState<"search" | "sources">("sources");
 
   // Ref for auto-scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -45,10 +51,69 @@ function SidePanel() {
     scrollToBottom();
   }, [chatMessages, isSynthesizing]);
 
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatMessages, isSynthesizing]);
+
+  const handleReset = () => {
+    if (confirm("Are you sure you want to clear your session? This will remove all synced content and chat history.")) {
+      clearData();
+      setChatMessages([]);
+      setChatInput("");
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (chatMessages.length === 0) return;
+    const currentTab = activeTabs[0] || { title: "Research", url: "https://synthesis.ai" };
+
+    // Simple toast or feedback could be added here
+    ExportService.printReport(
+      chatMessages.filter(m => !m.isError && m.content) as any,
+      currentTab.title,
+      currentTab.url
+    );
+  };
+
+  const handleExportMarkdown = () => {
+    if (chatMessages.length === 0) return;
+    const currentTab = activeTabs[0] || { title: "Research", url: "https://synthesis.ai" };
+
+    const md = ExportService.generateMarkdown(
+      chatMessages.filter(m => !m.isError && m.content) as any,
+      currentTab.title,
+      currentTab.url
+    );
+
+    navigator.clipboard.writeText(md).then(() => {
+      // We could add a toast state here if we had a toast component
+      alert("Research copied to clipboard as Markdown!");
+    });
+  };
+
   const getExtractedTabs = (): ExtractedContent[] => {
     return activeTabs
       .map((tab) => extractedData[tab.id])
       .filter(Boolean) as ExtractedContent[];
+  };
+
+  // Vision State
+  const [isVisionEnabled, setIsVisionEnabled] = useState(false);
+
+  const captureScreenshot = async (): Promise<string | undefined> => {
+    try {
+      // Need to capture from the current window
+      // @ts-ignore - Chrome types might be fussy
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab.windowId) return undefined;
+
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
+      // Remove data:image/jpeg;base64, prefix
+      return dataUrl.split(",")[1];
+    } catch (e) {
+      console.error("Screenshot failed", e);
+      return undefined;
+    }
   };
 
   const handleAction = async (input: string, mode?: SynthesisMode) => {
@@ -63,8 +128,19 @@ function SidePanel() {
       return;
     }
 
+    // Capture Image if in Vision Mode
+    let imageData: string | undefined;
+    if (isVisionEnabled) {
+      imageData = await captureScreenshot();
+      if (!imageData) {
+        setChatMessages((prev) => [...prev, { role: "assistant", content: "**Error**: Failed to capture visible tab. Ensure you are on a webpage." }]);
+        return;
+      }
+    }
+
     // Add user message
-    setChatMessages((prev) => [...prev, { role: "user", content: input }]);
+    const visionBadge = isVisionEnabled ? " 👁️ [Vision On]" : "";
+    setChatMessages((prev) => [...prev, { role: "user", content: input + visionBadge }]);
     setChatInput("");
 
     // Add placeholder assistant message
@@ -88,7 +164,8 @@ function SidePanel() {
         },
         chatMessages // Pass full history
           .filter(m => !m.isError && m.content) // Filter out errors and empty msgs
-          .map(m => ({ role: m.role, content: m.content }))
+          .map(m => ({ role: m.role, content: m.content })),
+        imageData // Pass image data if available
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -146,14 +223,61 @@ function SidePanel() {
         <h1 className="text-base font-semibold tracking-tight text-slate-50 flex items-center gap-2">
           AI Research Assistant
         </h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setShowSettings(!showSettings)}
-          className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
-        >
-          <Settings className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsVisionEnabled(!isVisionEnabled)}
+            className={`h-8 w-8 rounded-lg transition-colors ${isVisionEnabled
+              ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 hover:text-blue-300"
+              : "text-slate-400 hover:bg-slate-800 hover:text-white"
+              }`}
+            title={isVisionEnabled ? "Disable Vision (Screen Analysis)" : "Enable Vision (Screen Analysis)"}
+          >
+            {isVisionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </Button>
+          <div className="w-px h-4 bg-slate-800 mx-1" />
+          {chatMessages.length > 0 && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleExportMarkdown}
+                className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                title="Copy as Markdown"
+              >
+                <Copy className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleExportPDF}
+                className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                title="Download PDF Report"
+              >
+                <Download className="w-4 h-4" />
+              </Button>
+              <div className="w-px h-4 bg-slate-800 mx-1" />
+            </>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleReset}
+            className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+            title="Clear Session"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowSettings(!showSettings)}
+            className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       {/* Main Content */}
@@ -200,40 +324,48 @@ function SidePanel() {
 
             {/* Tab Content */}
             <div className="px-3 pb-3">
-              {extractedCount === 0 && !isExtracting ? (
-                <div className="flex items-center gap-3 py-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
-                    <Search className="w-4 h-4 text-slate-500" />
-                  </div>
-                  <span className="text-sm text-slate-400">No content synced yet.</span>
+              {activeSourceTab === 'search' ? (
+                <div className="py-8 text-center text-slate-500 text-sm italic">
+                  Google Search Integration coming soon...
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
-                  {activeTabs.map(tab => (
-                    <div key={tab.id} className="flex items-center gap-3">
-                      {tab.favIconUrl ? (
-                        <img
-                          src={tab.favIconUrl}
-                          className="rounded-sm opacity-80"
-                          style={{ width: '16px', height: '16px', minWidth: '16px' }}
-                        />
-                      ) : <FileText className="w-4 h-4 text-slate-600" />}
-                      <span className="text-sm text-slate-300 truncate flex-1">{tab.title}</span>
-                      {extractedData[tab.id] && <CheckCircle2 className="w-4 h-4 text-blue-500" />}
+                <>
+                  {extractedCount === 0 && !isExtracting ? (
+                    <div className="flex items-center gap-3 py-2">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                        <Search className="w-4 h-4 text-slate-500" />
+                      </div>
+                      <span className="text-sm text-slate-400">No content synced yet.</span>
                     </div>
-                  ))}
-                </div>
-              )}
+                  ) : (
+                    <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
+                      {activeTabs.map(tab => (
+                        <div key={tab.id} className="flex items-center gap-3">
+                          {tab.favIconUrl ? (
+                            <img
+                              src={tab.favIconUrl}
+                              className="rounded-sm opacity-80"
+                              style={{ width: '16px', height: '16px', minWidth: '16px' }}
+                            />
+                          ) : <FileText className="w-4 h-4 text-slate-600" />}
+                          <span className="text-sm text-slate-300 truncate flex-1">{tab.title}</span>
+                          {extractedData[tab.id] && <CheckCircle2 className="w-4 h-4 text-blue-500" />}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-              <Button
-                onClick={extractAll}
-                disabled={isExtracting}
-                className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
-              >
-                {isExtracting ? (
-                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</span>
-                ) : "Sync Content"}
-              </Button>
+                  <Button
+                    onClick={extractAll}
+                    disabled={isExtracting}
+                    className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
+                  >
+                    {isExtracting ? (
+                      <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</span>
+                    ) : "Sync Content"}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
