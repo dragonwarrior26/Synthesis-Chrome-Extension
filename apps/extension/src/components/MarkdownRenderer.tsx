@@ -1,4 +1,9 @@
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css'; // Import KaTeX CSS
 
 interface MarkdownRendererProps {
     content: string;
@@ -7,122 +12,55 @@ interface MarkdownRendererProps {
 }
 
 /**
- * Renders markdown content as formatted HTML
- * Supports: bold, headings, lists, tables, paragraphs
+ * Renders markdown content as formatted HTML using react-markdown.
+ * Supports: bold, headings, lists, tables, paragraphs, and LaTeX math.
  */
 export function MarkdownRenderer({ content, className = '', isStreaming = false }: MarkdownRendererProps) {
     if (!content) return null;
 
-    const lines = content.split('\n');
-    const elements: React.ReactNode[] = [];
-    let i = 0;
-    let key = 0;
-
-    while (i < lines.length) {
-        const line = lines[i];
-        const trimmedLine = line.trim();
-
-        // Skip empty lines
-        if (!trimmedLine) {
-            i++;
-            continue;
-        }
-
-        // Check for table (starts with |)
-        if (trimmedLine.startsWith('|')) {
-            const tableLines: string[] = [];
-            while (i < lines.length && lines[i].trim().startsWith('|')) {
-                tableLines.push(lines[i].trim());
-                i++;
-            }
-            elements.push(renderTable(tableLines, key++));
-            continue;
-        }
-
-        if (trimmedLine.startsWith('### ')) {
-            elements.push(
-                <h3 key={key++} className="text-sm font-bold text-slate-200 mt-4 mb-2">
-                    {trimmedLine.slice(4)}
-                </h3>
-            );
-            i++;
-            continue;
-        }
-
-        // Check for headings
-        if (trimmedLine.startsWith('## ')) {
-            elements.push(
-                <h2 key={key++} className="text-base font-bold text-slate-100 mt-5 mb-2 pb-1 border-b border-slate-700">
-                    {trimmedLine.slice(3)}
-                </h2>
-            );
-            i++;
-            continue;
-        }
-
-        if (trimmedLine.startsWith('# ')) {
-            elements.push(
-                <h1 key={key++} className="text-lg font-bold text-slate-50 mt-5 mb-2">
-                    {trimmedLine.slice(2)}
-                </h1>
-            );
-            i++;
-            continue;
-        }
-
-        // Check for bullet lists (- or *)
-        if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
-            const items: string[] = [];
-            while (i < lines.length && (lines[i].trim().startsWith('- ') || lines[i].trim().startsWith('* '))) {
-                const itemText = lines[i].trim().slice(2);
-                items.push(itemText);
-                i++;
-            }
-            elements.push(
-                <ul key={key++} className="space-y-1.5 my-3 ml-1">
-                    {items.map((item, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-slate-300">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 shrink-0" />
-                            <span>{renderInline(item)}</span>
-                        </li>
-                    ))}
-                </ul>
-            );
-            continue;
-        }
-
-        // Check for numbered lists
-        if (/^\d+\.\s/.test(trimmedLine)) {
-            const items: string[] = [];
-            while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
-                const itemText = lines[i].trim().replace(/^\d+\.\s/, '');
-                items.push(itemText);
-                i++;
-            }
-            elements.push(
-                <ol key={key++} className="space-y-1.5 my-3 ml-1 list-decimal list-inside text-slate-300">
-                    {items.map((item, idx) => (
-                        <li key={idx} className="text-slate-300">
-                            {renderInline(item)}
-                        </li>
-                    ))}
-                </ol>
-            );
-            continue;
-        }
-
-        // Regular paragraph
-        elements.push(
-            <p key={key++} className="text-slate-300 leading-relaxed mb-3">
-                {renderInline(trimmedLine)}
-            </p>
-        );
-        i++;
-    }
+    // If streaming, we might want to append a cursor to the content string visually,
+    // or just handle it via the container class as before.
+    // For react-markdown, passing the content directly updates the tree.
 
     return (
-        <div className={`space-y-3 font-medium ${className}`}>
-            {elements}
+        <div className={`markdown-body space-y-3 font-medium text-slate-300 leading-relaxed ${className}`}>
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                    // Override components for custom styling
+                    h1: ({ className, ...props }: React.ComponentPropsWithoutRef<'h1'> & { node?: any }) => <h1 className={`text-lg font-bold text-slate-50 mt-5 mb-2 ${className || ''}`} {...props} />,
+                    h2: ({ className, ...props }: React.ComponentPropsWithoutRef<'h2'> & { node?: any }) => <h2 className={`text-base font-bold text-slate-100 mt-5 mb-2 pb-1 border-b border-slate-700 ${className || ''}`} {...props} />,
+                    h3: ({ className, ...props }: React.ComponentPropsWithoutRef<'h3'> & { node?: any }) => <h3 className={`text-sm font-bold text-slate-200 mt-4 mb-2 ${className || ''}`} {...props} />,
+                    p: ({ className, ...props }: React.ComponentPropsWithoutRef<'p'> & { node?: any }) => <p className={`mb-3 ${className || ''}`} {...props} />,
+                    ul: ({ className, ...props }: React.ComponentPropsWithoutRef<'ul'> & { node?: any }) => <ul className={`list-disc list-outside ml-5 space-y-1 my-3 ${className || ''}`} {...props} />,
+                    ol: ({ className, ...props }: React.ComponentPropsWithoutRef<'ol'> & { node?: any }) => <ol className={`list-decimal list-outside ml-5 space-y-1 my-3 ${className || ''}`} {...props} />,
+                    li: ({ className, ...props }: React.ComponentPropsWithoutRef<'li'> & { node?: any }) => <li className={`pl-1 ${className || ''}`} {...props} />,
+                    table: ({ className, ...props }: React.ComponentPropsWithoutRef<'table'> & { node?: any }) => (
+                        <div className="my-4 overflow-x-auto rounded-lg border border-slate-700 shadow-sm bg-slate-900/50">
+                            <table className={`w-full text-sm text-left ${className || ''}`} {...props} />
+                        </div>
+                    ),
+                    thead: ({ className, ...props }: React.ComponentPropsWithoutRef<'thead'> & { node?: any }) => <thead className={`bg-slate-800/80 uppercase text-xs font-bold text-slate-400 ${className || ''}`} {...props} />,
+                    th: ({ className, ...props }: React.ComponentPropsWithoutRef<'th'> & { node?: any }) => <th className={`px-4 py-3 border-b border-slate-700 ${className || ''}`} {...props} />,
+                    td: ({ className, ...props }: React.ComponentPropsWithoutRef<'td'> & { node?: any }) => <td className={`px-4 py-3 text-slate-300 border-b border-slate-800/50 ${className || ''}`} {...props} />,
+                    blockquote: ({ className, ...props }: React.ComponentPropsWithoutRef<'blockquote'> & { node?: any }) => (
+                        <blockquote className={`border-l-4 border-blue-500 pl-4 py-1 my-4 bg-slate-800/30 rounded-r-lg italic text-slate-400 ${className || ''}`} {...props} />
+                    ),
+                    a: ({ className, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: any }) => <a className={`text-blue-400 hover:text-blue-300 underline ${className || ''}`} {...props} />,
+                    code: ({ className, children, ...props }: any) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        const isInline = !match && !String(children).includes('\n');
+                        return isInline ? (
+                            <code className="bg-slate-800 px-1.5 py-0.5 rounded text-sm font-mono text-emerald-400" {...props}>{children}</code>
+                        ) : (
+                            <code className="block bg-slate-950 p-3 rounded-lg text-xs font-mono text-slate-300 overflow-x-auto my-2 border border-slate-800" {...props}>{children}</code>
+                        );
+                    }
+                }}
+            >
+                {content}
+            </ReactMarkdown>
             {isStreaming && (
                 <span className="inline-block w-2 h-4 align-middle ml-1 bg-blue-500 animate-pulse rounded-sm" />
             )}
@@ -130,64 +68,3 @@ export function MarkdownRenderer({ content, className = '', isStreaming = false 
     );
 }
 
-// Render markdown table
-function renderTable(lines: string[], key: number): React.ReactNode {
-    if (lines.length < 2) return null;
-
-    const parseRow = (line: string): string[] => {
-        return line
-            .split('|')
-            .slice(1, -1) // Remove empty first and last
-            .map(cell => cell.trim());
-    };
-
-    const headers = parseRow(lines[0]);
-
-    // Skip separator line (|---|---|)
-    const dataLines = lines.slice(2);
-    const rows = dataLines.map(line => parseRow(line));
-
-    return (
-        <div key={key} className="my-4 overflow-x-auto rounded-lg border border-slate-700 shadow-sm bg-slate-900/50">
-            <table className="w-full text-sm text-left">
-                <thead className="bg-slate-800/80 uppercase text-xs font-bold text-slate-400">
-                    <tr>
-                        {headers.map((header, i) => (
-                            <th key={i} className="px-4 py-3 border-b border-slate-700">
-                                {renderInline(header)}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                    {rows.map((row, rowIdx) => (
-                        <tr key={rowIdx} className="hover:bg-slate-800/30 transition-colors">
-                            {row.map((cell, cellIdx) => (
-                                <td key={cellIdx} className="px-4 py-3 text-slate-300">
-                                    {renderInline(cell)}
-                                </td>
-                            ))}
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-}
-
-// Render inline formatting (bold, italic)
-function renderInline(text: string): React.ReactNode {
-    // Split by bold markers **text**
-    const parts = text.split(/(\*\*[^*]+\*\*)/g);
-
-    return parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-            return (
-                <strong key={i} className="font-bold text-slate-100">
-                    {part.slice(2, -2)}
-                </strong>
-            );
-        }
-        return part;
-    });
-}
