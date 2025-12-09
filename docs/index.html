@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Synthesis</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f8fafc;
+        }
+        h1 { border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 30px; }
+        h2 { margin-top: 30px; color: #1e293b; }
+        ul { background: #fff; padding: 20px 40px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .footer { margin-top: 50px; font-size: 0.9em; color: #64748b; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy for Synthesis</h1>
+    <p><strong>Last Updated:</strong> December 7, 2025</p>
+
+    <p>Synthesis ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how our Chrome Extension ("Synthesis") data.</p>
+
+    <h2>1. Data Collection and Usage</h2>
+    <p><strong>Synthesis is a "Local-First" application.</strong> We do not maintain our own servers to store your browsing history or conversation data.</p>
+    
+    <h3>Types of Data We Process:</h3>
+    <ul>
+        <li><strong>Website Content:</strong> When you click "Sync" or "Summarize", the extension reads the text content of the active tab to generate summaries. This data is sent directly from your browser to the Google Gemini API using your personal API Key.</li>
+        <li><strong>API Keys:</strong> Your Google Gemini API Key is stored locally on your device using <code>chrome.storage.local</code>. It is never transmitted to us or any third party other than Google.</li>
+        <li><strong>Chat History:</strong> Your conversation history is stored locally in your browser's memory and is cleared when you close the extension or browser.</li>
+    </ul>
+
+    <h2>2. Third-Party Services</h2>
+    <p>Synthesis uses the Google Gemini API to provide AI analysis.</p>
+    <ul>
+        <li>When you use the extension, the text content of the page you are viewing and your prompts are sent to Google.</li>
+        <li>Please refer to <a href="https://policies.google.com/privacy" target="_blank">Google's Generative AI Privacy Policy</a> for details.</li>
+        <li><strong>We do not have access to this data.</strong></li>
+    </ul>
+
+    <h2>3. Data Retention</h2>
+    <ul>
+        <li><strong>Local Data:</strong> Your API Key and preferences remain on your device until you uninstall the extension.</li>
+        <li><strong>Server Data:</strong> We do not have servers. We do not retain any of your data.</li>
+    </ul>
+
+    <h2>4. Your Rights</h2>
+    <p>Since we do not store your data, you have full control by managing your local browser storage and keys.</p>
+
+    <div class="footer">
+        &copy; 2025 Synthesis. Open Source.
+    </div>
+</body>
+</html>
