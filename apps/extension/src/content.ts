@@ -4,11 +4,11 @@ console.log('Synthesis content script loaded')
 
 // Listen for messages from the background script or side panel
 // Listen for messages from the background script or side panel
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async (message: ExtensionMessage, _sender, sendResponse) => {
     if (message.type === 'EXTRACT_CONTENT') {
         try {
             console.log('Extracting content...')
-            const extracted = ContentExtractor.extract(document)
+            const extracted = await ContentExtractor.extract(document, window.location.href)
 
             if (extracted) {
                 console.log('Content extracted:', extracted.title)

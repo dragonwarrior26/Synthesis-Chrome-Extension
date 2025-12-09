@@ -10,12 +10,32 @@ export interface ExtractedContent {
     siteName: string | null
 }
 
+import { PDFExtractor } from './PDFExtractor';
+
 export class ContentExtractor {
     /**
      * Extracts readable content from a Document object.
      * @param document The DOM Document to parse.
+     * @param url Optional URL of the document (to detect PDF)
      */
-    static extract(document: Document): ExtractedContent | null {
+    static async extract(document: Document, url?: string): Promise<ExtractedContent | null> {
+        // 1. Check if PDF
+        if (url && PDFExtractor.isPDF(url)) {
+            const pdfData = await PDFExtractor.extract(url);
+            if (pdfData) {
+                return {
+                    title: pdfData.title,
+                    content: pdfData.content, // PDF content is plain text usually
+                    textContent: pdfData.content,
+                    length: pdfData.content.length,
+                    excerpt: pdfData.content.substring(0, 200) + '...',
+                    byline: null,
+                    siteName: 'PDF Document'
+                };
+            }
+        }
+
+        // 2. Fallback to Readability (HTML)
         // Clone to avoid modifying the original DOM if Readability mutates it
         const clone = document.cloneNode(true) as Document
         const reader = new Readability(clone)

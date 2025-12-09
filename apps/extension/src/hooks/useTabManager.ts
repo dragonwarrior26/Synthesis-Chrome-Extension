@@ -44,6 +44,38 @@ export function useTabManager() {
     const extractFromTab = async (tabId: number) => {
         setIsExtracting(true)
         try {
+            // Find the tab info
+            const tab = activeTabs.find(t => t.id === tabId);
+            if (!tab) return;
+
+            // PDF Handling (Local Extraction in Side Panel)
+            if (tab.url.toLowerCase().endsWith('.pdf')) {
+                // Dynamic Import of Core to access PDFExtractor
+                // Note: We need to import PDFExtractor. ContentExtractor is already used in content script.
+                // We use the same Core package.
+                const { PDFExtractor } = await import('@synthesis/core');
+                console.log(`Extracting PDF from ${tab.url}`);
+                const pdfData = await PDFExtractor.extract(tab.url);
+
+                if (pdfData) {
+                    setExtractedData((prev) => ({
+                        ...prev,
+                        [tabId]: {
+                            title: pdfData.title,
+                            content: pdfData.content,
+                            textContent: pdfData.content,
+                            length: pdfData.content.length,
+                            excerpt: pdfData.content.substring(0, 200) + '...',
+                            byline: null,
+                            siteName: 'PDF Document'
+                        },
+                    }));
+                } else {
+                    console.error('PDF Extraction returned null');
+                }
+                return; // Skip content script message
+            }
+
             const message: ExtractContentMessage = { type: 'EXTRACT_CONTENT' }
 
             // Send message to content script
