@@ -23,8 +23,7 @@ import {
   Download,
   Copy,
   Eye,
-  EyeOff,
-  Camera
+  EyeOff
 } from "lucide-react";
 import { ExportService } from "@/services/ExportService";
 import "./index.css";
@@ -236,100 +235,6 @@ function SidePanel() {
             title={isVisionEnabled ? "Disable Vision (Screen Analysis)" : "Enable Vision (Screen Analysis)"}
           >
             {isVisionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={async () => {
-              if (isSynthesizing) return;
-
-              // 1. Get Active Tab
-              const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-              if (!tab?.id) return;
-
-              // 2. Trigger Crop Mode
-              try {
-                // We use chrome.tabs.sendMessage to active tab
-                const response = await chrome.tabs.sendMessage(tab.id, { type: 'START_CROP' });
-
-                if (response && response.type === 'CROP_RESULT' && response.payload) {
-                  const rect = response.payload;
-                  // 3. User selected a region. Now capture valid full screenshot.
-                  const fullScreenshotBase64 = await captureScreenshot();
-                  if (!fullScreenshotBase64) return;
-
-                  // 4. Crop it using Canvas
-                  const img = new Image();
-                  img.src = "data:image/jpeg;base64," + fullScreenshotBase64;
-                  await new Promise((resolve) => { img.onload = resolve; });
-
-                  const canvas = document.createElement('canvas');
-                  const pixelRatio = rect.pixelRatio || 1;
-                  // Set canvas to the actual pixel size of the crop
-                  canvas.width = rect.width * pixelRatio;
-                  canvas.height = rect.height * pixelRatio;
-
-                  const ctx = canvas.getContext('2d');
-                  if (!ctx) return;
-
-                  // Draw specific region
-                  // Source: x, y in physical pixels (captured image is physical size)
-                  // But rect.x, rect.y are CSS pixels from getBoundingClientRect
-                  // So we multiply by pixelRatio to map to the screenshots coordinate space.
-                  ctx.drawImage(
-                    img,
-                    rect.x * pixelRatio,
-                    rect.y * pixelRatio,
-                    rect.width * pixelRatio,
-                    rect.height * pixelRatio,
-                    0, 0,
-                    canvas.width,
-                    canvas.height
-                  );
-
-                  const croppedBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
-                  const fullDataUrl = "data:image/jpeg;base64," + croppedBase64;
-
-                  // 5. Send to Gemini
-                  // Add user message with a thumbnail
-                  setChatMessages(prev => [...prev, {
-                    role: "user",
-                    content: "📸 Analyzed Snapshot",
-                    image: fullDataUrl
-                  }]);
-
-                  // Placeholder
-                  setChatMessages(prev => [...prev, { role: "assistant", content: "" }]);
-
-                  // Perform Synthesis
-                  await performSynthesis(
-                    getExtractedTabs(),
-                    'chat',
-                    "Analyze this specific area of the screen. Explain what you see in detail.", // Contextual prompt
-                    (chunk) => {
-                      setChatMessages((prev) => {
-                        const newHistory = [...prev];
-                        const lastMsg = newHistory[newHistory.length - 1];
-                        if (lastMsg.role === "assistant") {
-                          lastMsg.content += chunk;
-                        }
-                        return newHistory;
-                      });
-                    },
-                    chatMessages.filter(m => !m.isError && m.content).map(m => ({ role: m.role, content: m.content })),
-                    croppedBase64
-                  );
-                }
-              } catch (e) {
-                console.error("Snapshot failed: ", e);
-                // Could be that content script isn't loaded on this tab (e.g. chrome://)
-                setChatMessages(prev => [...prev, { role: "assistant", content: "**Error**: Cannot capture snapshot on this page (Restricted URL or Content Script missing)." }]);
-              }
-            }}
-            className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-            title="Take Snapshot (Crop Area)"
-          >
-            <Camera className="w-4 h-4" />
           </Button>
           <div className="w-px h-4 bg-slate-800 mx-1" />
           {chatMessages.length > 0 && (
