@@ -546,12 +546,7 @@ function SidePanel() {
                     <img
                       src={msg.image}
                       alt="Snapshot"
-                      draggable={true}
-                      className="mt-2 rounded-lg border border-white/20 max-w-full h-auto max-h-[200px] object-cover hover:scale-105 transition-transform cursor-grab active:cursor-grabbing"
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("text/plain", msg.image!);
-                        e.dataTransfer.setData("text/uri-list", msg.image!);
-                      }}
+                      className="mt-2 rounded-lg border border-white/20 max-w-full h-auto max-h-[200px] object-cover hover:scale-105 transition-transform"
                     />
                   )}
                 </div>
