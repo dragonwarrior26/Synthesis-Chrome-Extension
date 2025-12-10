@@ -27,6 +27,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@synthesis/core": path.resolve(__dirname, "../../packages/core/src/index.ts"),
     },
   },
 });

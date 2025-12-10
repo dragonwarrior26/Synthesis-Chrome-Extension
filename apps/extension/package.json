@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:free": "VITE_SYNTHESIS_TIER=free tsc -b && VITE_SYNTHESIS_TIER=free vite build",
+    "build:pro": "VITE_SYNTHESIS_TIER=pro tsc -b && VITE_SYNTHESIS_TIER=pro vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

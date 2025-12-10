@@ -20,6 +20,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@mozilla/readability": "^0.6.0",
-    "pdfjs-dist": "^5.4.449"
+    "pdfjs-dist": "^5.4.449",
+    "youtube-transcript": "^1.2.1"
   }
 }

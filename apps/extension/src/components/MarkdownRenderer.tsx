@@ -18,21 +18,39 @@ interface MarkdownRendererProps {
 export function MarkdownRenderer({ content, className = '', isStreaming = false }: MarkdownRendererProps) {
     if (!content) return null;
 
-    // If streaming, we might want to append a cursor to the content string visually,
-    // or just handle it via the container class as before.
-    // For react-markdown, passing the content directly updates the tree.
+    // Aggressive content sanitization to prevent ghost space
+    const processedContent = content
+        // Remove any trailing whitespace/newlines first
+        .replace(/[\s\n\r]+$/, '')
+        // Remove leading whitespace
+        .replace(/^[\s\n\r]+/, '')
+        // Collapse 3+ newlines to 2
+        .replace(/\n{3,}/g, '\n\n')
+        // Remove empty lines at the end (lines with only whitespace)
+        .replace(/(\n\s*)+$/, '')
+        // Remove trailing whitespace on each line
+        .split('\n').map(line => line.trimEnd()).join('\n')
+        // Final trim
+        .trim();
 
     return (
-        <div className={`markdown-body space-y-3 font-medium text-slate-300 leading-relaxed ${className}`}>
+        <div className={`markdown-body font-medium text-slate-300 leading-relaxed ${className}`}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
                 components={{
                     // Override components for custom styling
-                    h1: ({ className, ...props }: React.ComponentPropsWithoutRef<'h1'> & { node?: any }) => <h1 className={`text-lg font-bold text-slate-50 mt-5 mb-2 ${className || ''}`} {...props} />,
-                    h2: ({ className, ...props }: React.ComponentPropsWithoutRef<'h2'> & { node?: any }) => <h2 className={`text-base font-bold text-slate-100 mt-5 mb-2 pb-1 border-b border-slate-700 ${className || ''}`} {...props} />,
-                    h3: ({ className, ...props }: React.ComponentPropsWithoutRef<'h3'> & { node?: any }) => <h3 className={`text-sm font-bold text-slate-200 mt-4 mb-2 ${className || ''}`} {...props} />,
-                    p: ({ className, ...props }: React.ComponentPropsWithoutRef<'p'> & { node?: any }) => <p className={`mb-3 ${className || ''}`} {...props} />,
+                    h1: ({ className, ...props }: React.ComponentPropsWithoutRef<'h1'> & { node?: any }) => <h1 className={`text-lg font-bold text-slate-50 mt-5 first:mt-0 mb-2 ${className || ''}`} {...props} />,
+                    h2: ({ className, ...props }: React.ComponentPropsWithoutRef<'h2'> & { node?: any }) => <h2 className={`text-base font-bold text-slate-100 mt-5 first:mt-0 mb-2 pb-1 border-b border-slate-700 ${className || ''}`} {...props} />,
+                    h3: ({ className, ...props }: React.ComponentPropsWithoutRef<'h3'> & { node?: any }) => <h3 className={`text-sm font-bold text-slate-200 mt-4 first:mt-0 mb-2 ${className || ''}`} {...props} />,
+                    p: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'p'> & { node?: any }) => {
+                        // Collapse empty paragraphs
+                        if (!children) return null;
+                        if (Array.isArray(children) && children.every(c => c === null || c === undefined || (typeof c === 'string' && c.trim() === ''))) {
+                            return null;
+                        }
+                        return <p className={`mb-3 last:mb-0 ${className || ''}`} {...props}>{children}</p>;
+                    },
                     ul: ({ className, ...props }: React.ComponentPropsWithoutRef<'ul'> & { node?: any }) => <ul className={`list-disc list-outside ml-5 space-y-1 my-3 ${className || ''}`} {...props} />,
                     ol: ({ className, ...props }: React.ComponentPropsWithoutRef<'ol'> & { node?: any }) => <ol className={`list-decimal list-outside ml-5 space-y-1 my-3 ${className || ''}`} {...props} />,
                     li: ({ className, ...props }: React.ComponentPropsWithoutRef<'li'> & { node?: any }) => <li className={`pl-1 ${className || ''}`} {...props} />,
@@ -48,6 +66,7 @@ export function MarkdownRenderer({ content, className = '', isStreaming = false 
                         <blockquote className={`border-l-4 border-blue-500 pl-4 py-1 my-4 bg-slate-800/30 rounded-r-lg italic text-slate-400 ${className || ''}`} {...props} />
                     ),
                     a: ({ className, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: any }) => <a className={`text-blue-400 hover:text-blue-300 underline ${className || ''}`} {...props} />,
+                    hr: () => <hr className="my-4 border-slate-700" />,
                     code: ({ className, children, ...props }: any) => {
                         const match = /language-(\w+)/.exec(className || '');
                         const isInline = !match && !String(children).includes('\n');
@@ -56,15 +75,16 @@ export function MarkdownRenderer({ content, className = '', isStreaming = false 
                         ) : (
                             <code className="block bg-slate-950 p-3 rounded-lg text-xs font-mono text-slate-300 overflow-x-auto my-2 border border-slate-800" {...props}>{children}</code>
                         );
-                    }
+                    },
                 }}
             >
-                {content}
+                {processedContent}
             </ReactMarkdown>
-            {isStreaming && (
-                <span className="inline-block w-2 h-4 align-middle ml-1 bg-blue-500 animate-pulse rounded-sm" />
-            )}
+            {
+                isStreaming && (
+                    <span className="inline-block w-2 h-4 align-middle ml-1 bg-blue-500 animate-pulse rounded-sm" />
+                )
+            }
         </div>
     );
 }
-

@@ -94,6 +94,41 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-slate-950 text-foreground;
   }
+}
+
+/* ============================================
+   KaTeX Styling - MINIMAL OVERRIDES ONLY
+   Let KaTeX handle its own internal layout
+   ============================================ */
+
+/* Dark mode colors only - DO NOT override display/positioning */
+.katex {
+  color: #e2e8f0 !important;
+}
+
+/* Block math styling */
+.katex-display {
+  margin: 1rem 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ============================================
+   Markdown Body Styling
+   ============================================ */
+
+/* Collapse truly empty elements */
+.markdown-body>p:empty {
+  display: none !important;
+}
+
+/* Constrain margins */
+.markdown-body>*:first-child {
+  margin-top: 0 !important;
+}
+
+.markdown-body>*:last-child {
+  margin-bottom: 0 !important;
 }

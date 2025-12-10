@@ -27,7 +27,8 @@ export function useSynthesis() {
         query?: string,
         onStream?: (chunk: string) => void,
         chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
-        imageData?: string
+        imageData?: string,
+        depth: 'standard' | 'deep' = 'standard'
     ) => {
         if (!apiKey) {
             throw new Error('Please enter your Gemini API Key using the settings icon.')
@@ -69,12 +70,12 @@ export function useSynthesis() {
             const gemini = new GeminiService(apiKey)
 
             if (onStream) {
-                const stream = await gemini.synthesizeStream(processedTabs, query, mode, chatHistory, imageData)
+                const stream = await gemini.synthesizeStream(processedTabs, query, mode, chatHistory, imageData, depth)
                 for await (const chunk of stream) {
                     onStream(chunk)
                 }
             } else {
-                await gemini.synthesize(processedTabs, query, mode, imageData)
+                await gemini.synthesize(processedTabs, query, mode, imageData, depth)
             }
         } catch (err) {
             console.error('Synthesis error:', err)

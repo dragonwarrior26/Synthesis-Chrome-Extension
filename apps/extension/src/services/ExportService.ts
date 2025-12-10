@@ -119,8 +119,77 @@ export class ExportService {
 
     private static formatInline(text: string): string {
         return text
+            // Handle block math $$...$$ first
+            .replace(/\$\$(.*?)\$\$/g, (_, math) => `<div class="math-block">${ExportService.convertLatexToReadable(math)}</div>`)
+            // Handle inline math $...$
+            .replace(/\$(.*?)\$/g, (_, math) => `<span class="math-inline">${ExportService.convertLatexToReadable(math)}</span>`)
+            // Handle bold
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            // Handle inline code
             .replace(/`(.*?)`/g, '<code>$1</code>');
+    }
+
+    /**
+     * Convert LaTeX commands to readable Unicode text for PDF export.
+     */
+    private static convertLatexToReadable(latex: string): string {
+        return latex
+            // Fractions: \frac{a}{b} → a/b
+            .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1)/($2)')
+            // Square root: \sqrt{x} → √x
+            .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+            // Subscripts: x_{n} or x_n → xₙ (simplified to just showing the subscript)
+            .replace(/(\w)_\{([^}]+)\}/g, '$1_$2')
+            .replace(/(\w)_(\w)/g, '$1_$2')
+            // Superscripts: x^{2} or x^2 → x²
+            .replace(/\^2(?![0-9])/g, '²')
+            .replace(/\^3(?![0-9])/g, '³')
+            .replace(/\^\{([^}]+)\}/g, '^($1)')
+            .replace(/\^(\w)/g, '^$1')
+            // Greek letters
+            .replace(/\\alpha/g, 'α')
+            .replace(/\\beta/g, 'β')
+            .replace(/\\gamma/g, 'γ')
+            .replace(/\\delta/g, 'δ')
+            .replace(/\\epsilon/g, 'ε')
+            .replace(/\\theta/g, 'θ')
+            .replace(/\\lambda/g, 'λ')
+            .replace(/\\mu/g, 'μ')
+            .replace(/\\pi/g, 'π')
+            .replace(/\\sigma/g, 'σ')
+            .replace(/\\omega/g, 'ω')
+            // Common operators
+            .replace(/\\times/g, '×')
+            .replace(/\\cdot/g, '·')
+            .replace(/\\div/g, '÷')
+            .replace(/\\pm/g, '±')
+            .replace(/\\leq/g, '≤')
+            .replace(/\\geq/g, '≥')
+            .replace(/\\neq/g, '≠')
+            .replace(/\\approx/g, '≈')
+            .replace(/\\infty/g, '∞')
+            .replace(/\\sum/g, 'Σ')
+            .replace(/\\prod/g, 'Π')
+            .replace(/\\int/g, '∫')
+            // Functions
+            .replace(/\\log/g, 'log')
+            .replace(/\\ln/g, 'ln')
+            .replace(/\\sin/g, 'sin')
+            .replace(/\\cos/g, 'cos')
+            .replace(/\\tan/g, 'tan')
+            .replace(/\\exp/g, 'exp')
+            .replace(/\\max/g, 'max')
+            .replace(/\\min/g, 'min')
+            .replace(/\\lim/g, 'lim')
+            // Softmax and other common ML terms
+            .replace(/\\text\{([^}]+)\}/g, '$1')
+            .replace(/\\mathrm\{([^}]+)\}/g, '$1')
+            .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+            // Remove remaining backslashes from unknown commands
+            .replace(/\\([a-zA-Z]+)/g, '$1')
+            // Clean up extra braces
+            .replace(/\{([^{}]+)\}/g, '$1')
+            .trim();
     }
 
     /**
@@ -176,6 +245,10 @@ export class ExportService {
                     th { background: #f8f9fa; text-align: left; font-weight: 600; }
                     th, td { padding: 10px 15px; border-bottom: 1px solid #e0e0e0; }
                     tr:last-child td { border-bottom: none; }
+                    
+                    /* Math styling for PDF */
+                    .math-inline { font-style: italic; font-family: "Times New Roman", serif; }
+                    .math-block { display: block; text-align: center; font-style: italic; font-family: "Times New Roman", serif; margin: 10px 0; }
                     
                     @media print {
                         body { padding: 0; }
