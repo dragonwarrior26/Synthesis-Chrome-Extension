@@ -1,7 +1,7 @@
 {
   "name": "extension",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,13 +13,12 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
+    "@supabase/supabase-js": "^2.87.1",
     "@synthesis/core": "workspace:^",
     "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.4",
-    "jspdf-autotable": "^5.0.2",
     "katex": "^0.16.27",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
@@ -34,6 +33,7 @@
   "devDependencies": {
     "@crxjs/vite-plugin": "2.0.0-beta.33",
     "@eslint/js": "^9.39.1",
+    "@rollup/plugin-replace": "^6.0.3",
     "@tailwindcss/vite": "^4.1.17",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
