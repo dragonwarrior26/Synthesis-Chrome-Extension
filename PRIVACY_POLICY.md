@@ -1,4 +1,4 @@
-# Privacy Policy for Synthesis - AI Research Analyst
+# Privacy Policy for Synthesis - Intelligent Tab Manager
 
 **Last Updated:** December 7, 2025
 

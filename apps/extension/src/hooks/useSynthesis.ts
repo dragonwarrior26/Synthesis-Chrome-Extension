@@ -12,6 +12,9 @@ export function useSynthesis() {
         chrome.storage.local.get(['geminiApiKey'], (result) => {
             if (result && typeof result.geminiApiKey === 'string') {
                 setApiKey(result.geminiApiKey)
+            } else if (import.meta.env.VITE_GEMINI_API_KEY) {
+                // Fallback to build-time key (Pro Tier)
+                setApiKey(import.meta.env.VITE_GEMINI_API_KEY)
             }
         })
     }, [])

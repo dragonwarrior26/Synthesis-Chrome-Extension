@@ -21,21 +21,22 @@ import * as pdfjsLib from 'pdfjs-dist';
 // we can use `pdfjs-dist/legacy/build/pdf` if we encounter issues, but let's stick to standard `pdfjs-dist`.
 
 // Only setting workerSrc if window is defined (browser)
-// Only setting workerSrc if window is defined (browser)
+// MV3 Compliant: NEVER use CDN fallback
 if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    // MV3 Compliant: Use local worker file from public folder
-    // This requires pdf.worker.min.mjs to be in the extension's root (public folder)
     try {
         const globalAny = typeof window !== 'undefined' ? window : globalThis;
         const chrome = (globalAny as any).chrome;
         if (chrome && chrome.runtime && chrome.runtime.getURL) {
+            // Chrome Extension: use local worker file
             pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.mjs');
         } else {
-            // Fallback for non-extension envs (dev/test)
-            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+            // Non-extension environments: disable worker (runs on main thread, slower but compliant)
+            // This avoids any CDN references
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
         }
     } catch (e) {
         console.warn('Failed to set PDF worker source', e);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
     }
 }
 

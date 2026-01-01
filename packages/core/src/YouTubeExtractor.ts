@@ -203,15 +203,20 @@ export const YouTubeExtractor = {
     ): Promise<YouTubeTranscriptResult | null> {
         try {
             // 1. Get audio URL from backend proxy
-            const audioResponse = await fetch(`${backendUrl}/audio`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId })
-            });
+            let audioResponse;
+            try {
+                audioResponse = await fetch(`${backendUrl}/audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId })
+                });
+            } catch (err) {
+                throw new Error(`STT Backend unreachable at ${backendUrl}. Please ensure the Audio Proxy is deployed.`);
+            }
 
             if (!audioResponse.ok) {
-                console.error('Failed to get audio URL from backend');
-                return null;
+                const text = await audioResponse.text();
+                throw new Error(`Backend Error (${audioResponse.status}): ${text}`);
             }
 
             const audioInfo = await audioResponse.json() as {
@@ -221,8 +226,7 @@ export const YouTubeExtractor = {
             };
 
             if (audioInfo.error || !audioInfo.audioUrl) {
-                console.error('Audio extraction error:', audioInfo.error);
-                return null;
+                throw new Error(audioInfo.error || 'Failed to extract audio URL');
             }
 
             // 2. Import GeminiService dynamically to avoid circular deps
@@ -240,7 +244,7 @@ export const YouTubeExtractor = {
             };
         } catch (error) {
             console.error('STT extraction failed:', error);
-            return null;
+            throw error; // Propagate error to UI
         }
     },
 
