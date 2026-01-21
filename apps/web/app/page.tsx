@@ -1,5 +1,6 @@
 import { Hero } from "@/components/Hero";
 import { Features } from "@/components/Features";
+import { Pricing } from "@/components/Pricing";
 import { Container } from "@/components/ui/Container";
 
 export default function Home() {
@@ -7,6 +8,7 @@ export default function Home() {
     <main className="flex min-h-screen flex-col">
       <Hero />
       <Features />
+      <Pricing />
 
       <footer className="py-12 border-t border-white/10 bg-black">
         <Container>
@@ -21,8 +23,8 @@ export default function Home() {
             </div>
 
             <div className="flex gap-6 text-sm text-neutral-400">
-              <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-white transition-colors">Terms</a>
+              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+              <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
               <a href="mailto:support@synthesisext.com" className="hover:text-white transition-colors">Contact</a>
             </div>
           </div>
