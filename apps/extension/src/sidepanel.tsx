@@ -60,7 +60,7 @@ function SidePanelContent() {
   const [extractedRawContent, setExtractedRawContent] = useState<ExtractedContent[]>([]);
 
 
-  const [showSettings, setShowSettings] = useState(!apiKey && !import.meta.env.VITE_GEMINI_API_KEY);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Vision State
   const [isVisionEnabled, setIsVisionEnabled] = useState(false);
@@ -809,7 +809,7 @@ function SidePanelContent() {
                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
                           <Search className="w-4 h-4 text-slate-500" />
                         </div>
-                        <span className="text-sm text-slate-400">No content synced. Add Tabs, Videos, or Notes.</span>
+                        <span className="text-sm text-slate-400">No content synced. Open Tabs, YouTube Videos, or attach Notes.</span>
                       </div>
                     ) : (
                       <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
