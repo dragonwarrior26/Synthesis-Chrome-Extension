@@ -133,12 +133,12 @@ export class GeminiService {
         tabs: ExtractedContent[],
         query?: string,
         mode: SynthesisMode = 'summary',
-        imageData?: string,
-        depth: 'standard' | 'deep' = 'standard',
+        _imageData?: string,
+        _depth: 'standard' | 'deep' = 'standard',
         contentLimit: number = 10000
     ): Promise<string> {
         // Build prompt (reuse core logic)
-        const prompt = this.buildPrompt(tabs, query, mode, depth, contentLimit)
+        const prompt = this.buildPrompt(tabs, query, mode, _depth, contentLimit)
 
         // Call Edge Function
         const { data, error } = await supabase.functions.invoke('ai-request', {
@@ -159,7 +159,7 @@ export class GeminiService {
         tabs: ExtractedContent[],
         query?: string,
         mode: SynthesisMode = 'summary',
-        depth: 'standard' | 'deep' = 'standard',
+        _depth: 'standard' | 'deep' = 'standard',
         contentLimit: number = 10000
     ): string {
         // Simplified prompt builder for server-side

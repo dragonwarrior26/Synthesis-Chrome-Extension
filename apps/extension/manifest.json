@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Synthesis - Intelligent Tab Manager",
     "description": "Organize tabs, extract content, and sync your research with AI-powered synthesis.",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "icons": {
         "128": "icon-128.png"
     },
