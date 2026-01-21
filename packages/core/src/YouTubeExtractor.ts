@@ -83,41 +83,138 @@ export const YouTubeExtractor = {
                 return null;
             }
 
-            // Fetch transcript using youtube-transcript library
-            const transcriptData: TranscriptResponse[] = await YoutubeTranscript.fetchTranscript(videoId);
+            console.log(`[YouTubeExtractor] Fetching captions for video: ${videoId}`);
 
-            if (!transcriptData || transcriptData.length === 0) {
+            // Method 1: Try the youtube-transcript library first
+            try {
+                const transcriptData: TranscriptResponse[] = await YoutubeTranscript.fetchTranscript(videoId);
+
+                if (transcriptData && transcriptData.length > 0) {
+                    console.log(`[YouTubeExtractor] Got ${transcriptData.length} caption segments from library`);
+
+                    const segments: TranscriptSegment[] = transcriptData.map(item => ({
+                        text: item.text,
+                        offset: item.offset,
+                        duration: item.duration
+                    }));
+
+                    const lastSegment = transcriptData[transcriptData.length - 1];
+                    const totalDurationMs = lastSegment.offset + lastSegment.duration;
+                    const totalDurationSec = Math.ceil(totalDurationMs / 1000);
+
+                    const fullTranscript = transcriptData
+                        .map(item => item.text)
+                        .join(' ')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+
+                    return {
+                        videoId,
+                        transcript: fullTranscript,
+                        duration: totalDurationSec,
+                        segments
+                    };
+                }
+            } catch (libError) {
+                console.warn('[YouTubeExtractor] Library method failed, trying direct fetch:', libError);
+            }
+
+            // Method 2: Direct fetch from YouTube (works in extension context)
+            const videoPageUrl = `https://www.youtube.com/watch?v=${videoId}`;
+            const response = await fetch(videoPageUrl);
+
+            if (!response.ok) {
+                console.error(`[YouTubeExtractor] Failed to fetch video page: ${response.status}`);
                 return null;
             }
 
-            // Convert to our format
-            const segments: TranscriptSegment[] = transcriptData.map(item => ({
-                text: item.text,
-                offset: item.offset,
-                duration: item.duration
-            }));
+            const html = await response.text();
 
-            // Calculate total duration from last segment
-            const lastSegment = transcriptData[transcriptData.length - 1];
-            const totalDurationMs = lastSegment.offset + lastSegment.duration;
-            const totalDurationSec = Math.ceil(totalDurationMs / 1000);
+            // Extract caption tracks from the page
+            const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+            if (!captionTracksMatch) {
+                console.log('[YouTubeExtractor] No caption tracks found in page');
+                return null;
+            }
 
-            // Join all text into a single transcript
-            const fullTranscript = transcriptData
-                .map(item => item.text)
-                .join(' ')
-                .replace(/\s+/g, ' ')
-                .trim();
+            let captionTracks;
+            try {
+                captionTracks = JSON.parse(captionTracksMatch[1]);
+            } catch (e) {
+                console.error('[YouTubeExtractor] Failed to parse caption tracks');
+                return null;
+            }
+
+            if (!captionTracks || captionTracks.length === 0) {
+                console.log('[YouTubeExtractor] Caption tracks array is empty');
+                return null;
+            }
+
+            // Prefer English captions, fallback to first available
+            const englishTrack = captionTracks.find((t: any) =>
+                t.languageCode === 'en' || t.languageCode?.startsWith('en')
+            );
+            const captionTrack = englishTrack || captionTracks[0];
+
+            if (!captionTrack?.baseUrl) {
+                console.log('[YouTubeExtractor] No baseUrl in caption track');
+                return null;
+            }
+
+            // Fetch the actual captions
+            const captionUrl = captionTrack.baseUrl + '&fmt=json3';
+            console.log(`[YouTubeExtractor] Fetching captions from: ${captionUrl.substring(0, 100)}...`);
+
+            const captionResponse = await fetch(captionUrl);
+            if (!captionResponse.ok) {
+                console.error(`[YouTubeExtractor] Failed to fetch captions: ${captionResponse.status}`);
+                return null;
+            }
+
+            const captionData = await captionResponse.json();
+
+            if (!captionData.events || captionData.events.length === 0) {
+                console.log('[YouTubeExtractor] No caption events in response');
+                return null;
+            }
+
+            // Parse caption events
+            const segments: TranscriptSegment[] = [];
+            let fullText = '';
+
+            for (const event of captionData.events) {
+                if (event.segs) {
+                    const text = event.segs.map((s: any) => s.utf8 || '').join('');
+                    if (text.trim()) {
+                        segments.push({
+                            text: text.trim(),
+                            offset: event.tStartMs || 0,
+                            duration: event.dDurationMs || 0
+                        });
+                        fullText += text + ' ';
+                    }
+                }
+            }
+
+            if (segments.length === 0) {
+                console.log('[YouTubeExtractor] No valid caption segments found');
+                return null;
+            }
+
+            const lastSeg = segments[segments.length - 1];
+            const totalDurationSec = Math.ceil((lastSeg.offset + lastSeg.duration) / 1000);
+
+            console.log(`[YouTubeExtractor] Successfully extracted ${segments.length} caption segments`);
 
             return {
                 videoId,
-                transcript: fullTranscript,
+                transcript: fullText.replace(/\s+/g, ' ').trim(),
                 duration: totalDurationSec,
                 segments
             };
+
         } catch (error) {
-            // Captions not available or other error
-            console.warn('Caption extraction failed:', error);
+            console.error('[YouTubeExtractor] Caption extraction failed:', error);
             return null;
         }
     },

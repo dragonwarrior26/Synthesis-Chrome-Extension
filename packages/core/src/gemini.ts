@@ -21,9 +21,10 @@ export class GeminiService {
         query?: string,
         mode: SynthesisMode = 'summary',
         imageData?: string,
-        depth: 'standard' | 'deep' = 'standard'
+        depth: 'standard' | 'deep' = 'standard',
+        contentLimit: number = 10000
     ): Promise<string> {
-        const prompt = this.buildPrompt(tabs, query, mode, [], imageData, depth)
+        const prompt = this.buildPrompt(tabs, query, mode, [], imageData, depth, contentLimit)
         const result = await this.model.generateContent(prompt)
         return result.response.text()
     }
@@ -34,9 +35,10 @@ export class GeminiService {
         mode: SynthesisMode = 'summary',
         chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
         imageData?: string,
-        depth: 'standard' | 'deep' = 'standard'
+        depth: 'standard' | 'deep' = 'standard',
+        contentLimit: number = 10000
     ): Promise<AsyncGenerator<string>> {
-        const prompt = this.buildPrompt(tabs, query, mode, chatHistory, imageData, depth)
+        const prompt = this.buildPrompt(tabs, query, mode, chatHistory, imageData, depth, contentLimit)
         const result = await this.model.generateContentStream(prompt)
 
         async function* streamGenerator() {
@@ -102,6 +104,33 @@ export class GeminiService {
     }
 
     /**
+     * Transcribe audio from base64 data directly.
+     * Used for browser-captured audio (no backend needed).
+     * 
+     * @param base64Data - Base64 encoded audio data
+     * @param mimeType - MIME type of the audio (e.g., 'audio/webm')
+     * @returns Transcribed text
+     */
+    async transcribeAudioData(base64Data: string, mimeType: string = 'audio/webm'): Promise<string> {
+        try {
+            const result = await this.model.generateContent([
+                {
+                    inlineData: {
+                        mimeType,
+                        data: base64Data
+                    }
+                },
+                { text: 'Transcribe this audio accurately. Return only the transcript text, no timestamps or speaker labels.' }
+            ])
+
+            return result.response.text()
+        } catch (error) {
+            console.error('Audio transcription failed:', error)
+            throw error
+        }
+    }
+
+    /**
      * Convert ArrayBuffer to base64 string
      */
     private arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -139,13 +168,16 @@ Instructions:
 `
     }
 
-    private buildContext(tabs: ExtractedContent[]): string {
+    private buildContext(tabs: ExtractedContent[], contentLimit: number = 10000): string {
+        // Calculate per-tab limit to distribute content evenly
+        const perTabLimit = Math.floor(contentLimit / Math.max(tabs.length, 1));
+
         return tabs.map((tab, index) => `
 ---
 Source ${index + 1}: ${tab.title}
 Site: ${tab.siteName || 'Unknown'}
 Content:
-${tab.textContent.slice(0, 10000)}
+${tab.textContent.slice(0, perTabLimit)}
 ---
 `).join('\n')
     }
@@ -270,9 +302,10 @@ Write a **Critical Technical Analysis** on the provided content.
         mode: SynthesisMode = 'summary',
         chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
         imageData?: string,
-        depth: 'standard' | 'deep' = 'standard'
+        depth: 'standard' | 'deep' = 'standard',
+        contentLimit: number = 10000
     ): any[] {
-        const context = this.buildContext(tabs)
+        const context = this.buildContext(tabs, contentLimit)
 
         // Format history
         const historyStr = chatHistory.length > 0

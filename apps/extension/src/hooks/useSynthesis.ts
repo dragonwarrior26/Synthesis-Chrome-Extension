@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { GeminiService, type ExtractedContent } from '@synthesis/core'
+import { getContentLimit } from '@/config/features'
 
 export type SynthesisMode = 'chat' | 'summary' | 'table' | 'proscons' | 'insights'
 
@@ -42,28 +43,34 @@ export function useSynthesis() {
             throw new Error('Invalid API Key format. Gemini keys typically start with "AIza". Check your key.')
         }
 
-        // 2. Validate Content & Truncate (Only if not asking a pure vision question, but let's keep it safe)
+        // 2. Check for BYOK (user has their own API key)
+        const hasByok = !!apiKey && apiKey !== import.meta.env.VITE_GEMINI_API_KEY;
+
+        // 3. Get tier-based content limit
+        const contentLimit = getContentLimit(hasByok);
+        console.log(`[Synthesis] Using content limit: ${contentLimit} chars (BYOK: ${hasByok})`);
+
+        // 4. Validate Content & Truncate (Only if not asking a pure vision question)
         const totalLength = tabs.reduce((acc, tab) => acc + (tab.textContent?.length || 0), 0);
         // If imageData is present, we permit empty text content (Vision mode)
         if (totalLength < 10 && !query && !imageData) {
             throw new Error('Extracted content appears empty. Please try extracting correctly loaded pages.')
         }
 
-        // Limit to ~120k chars (~30k tokens) to be safe for intermediate models
-        const MAX_CHARS = 120000;
+        // Limit based on tier
         let processedTabs = tabs;
 
-        if (totalLength > MAX_CHARS) {
+        if (totalLength > contentLimit) {
             let currentChars = 0;
             processedTabs = tabs.map(tab => {
-                if (currentChars >= MAX_CHARS) return { ...tab, textContent: '' };
-                const remaining = MAX_CHARS - currentChars;
+                if (currentChars >= contentLimit) return { ...tab, textContent: '' };
+                const remaining = contentLimit - currentChars;
                 const content = tab.textContent || '';
                 const sliced = content.slice(0, remaining);
                 currentChars += sliced.length;
                 return { ...tab, textContent: sliced };
             });
-            console.warn(`Truncated content from ${totalLength} to ${MAX_CHARS} chars to prevent token overflow.`);
+            console.warn(`[Synthesis] Truncated content from ${totalLength} to ${contentLimit} chars based on tier.`);
         }
 
         setIsSynthesizing(true)
@@ -73,12 +80,12 @@ export function useSynthesis() {
             const gemini = new GeminiService(apiKey)
 
             if (onStream) {
-                const stream = await gemini.synthesizeStream(processedTabs, query, mode, chatHistory, imageData, depth)
+                const stream = await gemini.synthesizeStream(processedTabs, query, mode, chatHistory, imageData, depth, contentLimit)
                 for await (const chunk of stream) {
                     onStream(chunk)
                 }
             } else {
-                await gemini.synthesize(processedTabs, query, mode, imageData, depth)
+                await gemini.synthesize(processedTabs, query, mode, imageData, depth, contentLimit)
             }
         } catch (err) {
             console.error('Synthesis error:', err)

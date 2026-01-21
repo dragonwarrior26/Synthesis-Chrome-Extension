@@ -10,7 +10,8 @@
         "sidePanel",
         "tabs",
         "storage",
-        "identity"
+        "identity",
+        "scripting"
     ],
     "host_permissions": [
         "<all_urls>"

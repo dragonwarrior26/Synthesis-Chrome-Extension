@@ -6,12 +6,13 @@ import { FeatureGate } from "@/components/FeatureGate";
 import { Features } from "@/config/features";
 import { useTabManager } from "@/hooks/useTabManager";
 import { useSynthesis, type SynthesisMode } from "@/hooks/useSynthesis";
-import { type ExtractedContent, YouTubeExtractor, type YouTubeVideoInfo, GoogleSearchExtractor } from "@synthesis/core";
+import { type ExtractedContent, YouTubeExtractor, type YouTubeVideoInfo } from "@synthesis/core";
 import {
   Settings,
   FileText,
   CheckCircle2,
   Loader2,
+  FileType,
   Search,
   Send,
   Sparkles,
@@ -43,7 +44,7 @@ function SidePanelContent() {
   const [chatMessages, setChatMessages] = useState<
     { role: "user" | "assistant"; content: string; isError?: boolean; image?: string }[]
   >([]);
-  const [activeSourceTab, setActiveSourceTab] = useState<"search" | "sources" | "youtube">("sources");
+  const [activeSourceTab, setActiveSourceTab] = useState<"text" | "sources" | "youtube">("sources");
 
   // YouTube State
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -53,12 +54,11 @@ function SidePanelContent() {
   const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
-  // Google Search state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ title: string; link: string; snippet: string }[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [googleSearchApiKey, setGoogleSearchApiKey] = useState(import.meta.env.VITE_GOOGLE_API_KEY || "");
-  const [googleSearchEngineId, setGoogleSearchEngineId] = useState(import.meta.env.VITE_GOOGLE_SEARCH_CX || "");
+  // Raw Text State
+  const [rawText, setRawText] = useState("");
+  const [rawTextTitle, setRawTextTitle] = useState("");
+  const [extractedRawContent, setExtractedRawContent] = useState<ExtractedContent[]>([]);
+
 
   const [showSettings, setShowSettings] = useState(!apiKey && !import.meta.env.VITE_GEMINI_API_KEY);
 
@@ -133,7 +133,9 @@ function SidePanelContent() {
       setChatInput("");
       setExtractedYouTubeContent([]);
       setYoutubeVideos([]);
-      setSearchResults([]);
+      setExtractedRawContent([]);
+      setRawText("");
+      setRawTextTitle("");
     }
   };
 
@@ -190,7 +192,7 @@ function SidePanelContent() {
     const tabContent = activeTabs
       .map((tab) => extractedData[tab.id])
       .filter(Boolean) as ExtractedContent[];
-    return [...tabContent, ...extractedYouTubeContent];
+    return [...tabContent, ...extractedYouTubeContent, ...extractedRawContent];
   };
 
   const captureScreenshot = async (): Promise<string | undefined> => {
@@ -272,21 +274,23 @@ function SidePanelContent() {
     handleAction(chatInput.trim());
   };
 
-  const handleGoogleSearch = async () => {
-    if (!searchQuery.trim() || !googleSearchApiKey || !googleSearchEngineId) return;
+  const handleAddRawText = () => {
+    if (!rawText.trim()) return;
 
-    setIsSearching(true);
-    try {
-      const results = await GoogleSearchExtractor.search(
-        searchQuery,
-        { apiKey: googleSearchApiKey, searchEngineId: googleSearchEngineId }
-      );
-      setSearchResults(results);
-    } catch (e) {
-      console.error("Search failed", e);
-    } finally {
-      setIsSearching(false);
-    }
+    const newContent: ExtractedContent = {
+      title: rawTextTitle.trim() || "Untitled Note",
+      content: rawText,
+      textContent: rawText,
+      length: rawText.length,
+      siteName: "User Note",
+      excerpt: rawText.substring(0, 150) + "...",
+      byline: "User"
+    };
+
+    setExtractedRawContent(prev => [...prev, newContent]);
+    setRawText("");
+    setRawTextTitle("");
+    alert("Note added to synthesis context!");
   };
 
   const handleYouTubeSync = async () => {
@@ -294,21 +298,150 @@ function SidePanelContent() {
 
     setIsSyncingYouTube(true);
     const newContent: ExtractedContent[] = [];
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://synthesis-backend.workers.dev"; // Placeholder
 
     try {
       for (const video of youtubeVideos) {
         let transcript: string | undefined;
 
-        if (video.hasNativeCaptions) {
-          const result = await YouTubeExtractor.extractCaptions(video.videoId);
-          transcript = result?.transcript;
-        } else {
-          if (apiKey || import.meta.env.VITE_GEMINI_API_KEY) {
-            const keyToUse = (apiKey || import.meta.env.VITE_GEMINI_API_KEY) as string;
-            const result = await YouTubeExtractor.extractWithSTT(video.videoId, BACKEND_URL, keyToUse);
-            transcript = result?.transcript;
+        console.log(`[Sync] Processing video: ${video.videoId}`);
+
+        // Step 1: Find YouTube tab with this video
+        let tabs = await chrome.tabs.query({ url: `*://www.youtube.com/watch?v=${video.videoId}*` });
+
+        if (tabs.length === 0) {
+          // Try to find any YouTube tab with this video
+          const allYouTubeTabs = await chrome.tabs.query({ url: "*://www.youtube.com/*" });
+          const matchingTab = allYouTubeTabs.find(t => t.url?.includes(video.videoId));
+          if (matchingTab) {
+            tabs = [matchingTab];
           }
+        }
+
+        if (tabs.length > 0 && tabs[0].id) {
+          const tabId = tabs[0].id;
+          console.log(`[Sync] Found YouTube tab ${tabId} for video ${video.videoId}`);
+
+          // Ensure content script is injected (handles tabs opened before extension reload)
+          try {
+            // Inject the content script file that's defined in manifest
+            await chrome.scripting.executeScript({
+              target: { tabId },
+              func: () => {
+                // Check if already injected
+                if ((window as any).__synthesisContentScriptLoaded) {
+                  console.log('[Synthesis] Content script already loaded');
+                  return;
+                }
+                (window as any).__synthesisContentScriptLoaded = true;
+                console.log('[Synthesis] Content script marker set');
+              }
+            });
+            console.log(`[Sync] Content script check completed for tab ${tabId}`);
+          } catch (injectErr) {
+            console.log(`[Sync] Content script check failed:`, injectErr);
+          }
+
+          // Small delay to let script initialize
+          await new Promise(r => setTimeout(r, 500));
+
+          // Step 2: Request captions from content script
+          try {
+            const captionResult = await new Promise<{ transcript: string; segments: any[] } | null>((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error('Content script timeout'));
+              }, 15000);
+
+              chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_YOUTUBE_CAPTIONS' }, (response) => {
+                clearTimeout(timeout);
+                if (chrome.runtime.lastError) {
+                  console.warn('[Sync] Content script error:', chrome.runtime.lastError.message);
+                  resolve(null);
+                } else if (response?.type === 'CAPTIONS_EXTRACTED') {
+                  resolve(response.payload);
+                } else if (response?.type === 'ERROR') {
+                  console.warn('[Sync] Caption extraction error:', response.error);
+                  resolve(null);
+                } else {
+                  resolve(null);
+                }
+              });
+            });
+
+            if (captionResult?.transcript) {
+              transcript = captionResult.transcript;
+              console.log(`[Sync] Got captions from content script: ${transcript.length} chars`);
+            }
+          } catch (err) {
+            console.warn('[Sync] Content script caption extraction failed:', err);
+          }
+        }
+
+        // Step 3: Fallback to YouTubeExtractor (library-based)
+        if (!transcript) {
+          console.log(`[Sync] Trying YouTubeExtractor.extractCaptions for ${video.videoId}...`);
+          try {
+            const result = await YouTubeExtractor.extractCaptions(video.videoId);
+            if (result?.transcript) {
+              transcript = result.transcript;
+              console.log(`[Sync] Got captions from YouTubeExtractor: ${transcript.length} chars`);
+            }
+          } catch (err) {
+            console.warn('[Sync] YouTubeExtractor failed:', err);
+          }
+        }
+
+        // Step 4: If still no captions and we have a tab, try audio capture (Pro feature)
+        if (!transcript && tabs.length > 0 && tabs[0].id) {
+          const keyToUse = (apiKey || import.meta.env.VITE_GEMINI_API_KEY) as string;
+
+          if (!keyToUse) {
+            alert(`No captions found for "${video.title}". API key required for speech-to-text.`);
+            continue;
+          }
+
+          const tabId = tabs[0].id;
+
+          // Get tier-based audio capture limit
+          const hasByok = !!keyToUse && keyToUse !== import.meta.env.VITE_GEMINI_API_KEY;
+          const { getAudioCaptureLimit } = await import('@/config/features');
+          const maxDurationSeconds = getAudioCaptureLimit(hasByok);
+          console.log(`[Sync] Trying audio capture for ${video.videoId} (max ${maxDurationSeconds}s)...`);
+
+          try {
+            const captureResult = await new Promise<{ audioData: string; mimeType: string }>((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error('Audio capture timeout'));
+              }, 15000);
+
+              chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_YOUTUBE_AUDIO', payload: { maxDurationSeconds } }, (response) => {
+                clearTimeout(timeout);
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else if (response?.type === 'AUDIO_CAPTURED') {
+                  resolve(response.payload);
+                } else if (response?.type === 'ERROR') {
+                  reject(new Error(response.error));
+                } else {
+                  reject(new Error('Unexpected response'));
+                }
+              });
+            });
+
+            const { GeminiService } = await import('@synthesis/core');
+            const gemini = new GeminiService(keyToUse);
+            transcript = await gemini.transcribeAudioData(captureResult.audioData, captureResult.mimeType);
+            console.log(`[Sync] Got transcript from audio capture: ${transcript.length} chars`);
+          } catch (err) {
+            console.error('[Sync] Audio capture failed:', err);
+            alert(`Audio capture failed for "${video.title}": ${(err as Error).message}`);
+            continue;
+          }
+        }
+
+        // Step 5: If no tab found and no captions, inform user
+        if (!transcript && tabs.length === 0) {
+          alert(`Please open "${video.title}" in a YouTube tab first, then try syncing again.`);
+          continue;
         }
 
         if (transcript) {
@@ -329,7 +462,7 @@ function SidePanelContent() {
       if (newContent.length > 0) {
         alert(`Successfully synced ${newContent.length} videos!`);
       } else {
-        alert("Failed to extract transcripts. Check if videos have captions or if STT is configured.");
+        alert("No transcripts could be extracted. Please open the YouTube video in a tab and try again.");
       }
 
     } catch (e) {
@@ -359,7 +492,7 @@ function SidePanelContent() {
     }
   };
 
-  const extractedCount = Object.keys(extractedData).length + extractedYouTubeContent.length;
+  const extractedCount = Object.keys(extractedData).length + extractedYouTubeContent.length + extractedRawContent.length;
 
   if (hasConsented === null) {
     return <div className="dark h-screen flex items-center justify-center bg-slate-950 text-slate-50">
@@ -398,6 +531,19 @@ function SidePanelContent() {
             </Button>
           )}
           <div className="w-px h-4 bg-slate-800 mx-1" />
+
+          {/* Upgrade Button (Placeholder) */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-500 hover:text-amber-400 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition-all"
+            onClick={() => alert("Pro Tier: Coming Soon! Enjoy all features for free during the preview.")}
+          >
+            Upgrade
+          </Button>
+
+          <div className="w-px h-4 bg-slate-800 mx-1" />
+
           {chatMessages.length > 0 && (
             <>
               <Button
@@ -508,10 +654,10 @@ function SidePanelContent() {
               <div className="flex items-center border-b border-slate-800 mb-3">
                 <FeatureGate feature="googleSearch">
                   <button
-                    onClick={() => setActiveSourceTab('search')}
-                    className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center ${activeSourceTab === 'search' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
+                    onClick={() => setActiveSourceTab('text')}
+                    className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center ${activeSourceTab === 'text' ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
                   >
-                    Google Search
+                    Notes
                   </button>
                 </FeatureGate>
                 <button
@@ -532,68 +678,47 @@ function SidePanelContent() {
 
               {/* Tab Content */}
               <div className="px-3 pb-3">
-                {activeSourceTab === 'search' ? (
-                  <FeatureGate feature="googleSearch">
-                    <div className="space-y-3">
-                      {/* Inputs Hidden if Pre-Configured */}
-                      {(!googleSearchApiKey || !googleSearchEngineId) && (
-                        <div className="p-3 bg-slate-800/50 rounded-lg space-y-2">
-                          <p className="text-xs text-slate-400">Configure Google Custom Search API</p>
-                          <input
-                            type="password"
-                            value={googleSearchApiKey}
-                            onChange={(e) => setGoogleSearchApiKey(e.target.value)}
-                            placeholder="API Key"
-                            className="w-full px-3 py-2 bg-slate-700/80 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500"
-                          />
-                          <input
-                            type="text"
-                            value={googleSearchEngineId}
-                            onChange={(e) => setGoogleSearchEngineId(e.target.value)}
-                            placeholder="Search Engine ID (cx)"
-                            className="w-full px-3 py-2 bg-slate-700/80 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500"
-                          />
-                        </div>
-                      )}
+                {activeSourceTab === 'text' ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={rawTextTitle}
+                      onChange={(e) => setRawTextTitle(e.target.value)}
+                      placeholder="Note Title (Optional)"
+                      className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                    />
+                    <textarea
+                      value={rawText}
+                      onChange={(e) => setRawText(e.target.value)}
+                      placeholder="Paste text, meeting notes, or emails here to analyze..."
+                      className="w-full h-32 px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none custom-scrollbar"
+                    />
+                    <Button
+                      onClick={handleAddRawText}
+                      disabled={!rawText.trim()}
+                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-medium h-9 rounded-lg shadow-lg shadow-orange-900/20 transition-all"
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Add to Context
+                    </Button>
 
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && !isSearching && searchQuery.trim() && handleGoogleSearch()}
-                          placeholder="Search the web..."
-                          className="flex-1 px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                        <Button
-                          onClick={handleGoogleSearch}
-                          disabled={isSearching || !searchQuery.trim() || !googleSearchApiKey || !googleSearchEngineId}
-                          size="icon"
-                          className="h-9 w-9 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-                        >
-                          {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                        </Button>
+                    {extractedRawContent.length > 0 && (
+                      <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar pt-2 border-t border-slate-800">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Added Notes</p>
+                        {extractedRawContent.map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-3 p-2 bg-slate-800/30 rounded-lg group">
+                            <FileType className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                            <span className="text-xs text-slate-300 truncate flex-1">{item.title}</span>
+                            <button
+                              onClick={() => setExtractedRawContent(prev => prev.filter((_, i) => i !== idx))}
+                              className="p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
-
-                      {searchResults.length > 0 && (
-                        <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar">
-                          {searchResults.map((result, idx) => (
-                            <div key={idx} className="p-2 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors">
-                              <a
-                                href={result.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-blue-400 hover:underline font-medium line-clamp-1"
-                              >
-                                {result.title}
-                              </a>
-                              <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{result.snippet}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </FeatureGate>
+                    )}
+                  </div>
                 ) : activeSourceTab === 'youtube' ? (
                   <div className="space-y-3">
                     <div className="flex gap-2">
@@ -684,7 +809,7 @@ function SidePanelContent() {
                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
                           <Search className="w-4 h-4 text-slate-500" />
                         </div>
-                        <span className="text-sm text-slate-400">No content synced yet.</span>
+                        <span className="text-sm text-slate-400">No content synced. Add Tabs, Videos, or Notes.</span>
                       </div>
                     ) : (
                       <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
@@ -698,6 +823,13 @@ function SidePanelContent() {
                         {extractedYouTubeContent.map((item, idx) => (
                           <div key={idx} className="flex items-center gap-3">
                             <Youtube className="w-4 h-4 text-red-600" />
+                            <span className="text-sm text-slate-300 truncate flex-1">{item.title}</span>
+                            <CheckCircle2 className="w-4 h-4 text-green-500" />
+                          </div>
+                        ))}
+                        {extractedRawContent.map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-3">
+                            <FileType className="w-4 h-4 text-orange-600" />
                             <span className="text-sm text-slate-300 truncate flex-1">{item.title}</span>
                             <CheckCircle2 className="w-4 h-4 text-green-500" />
                           </div>

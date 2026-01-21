@@ -115,53 +115,63 @@ export class ExportService {
     }
 
     private static convertLatexToReadable(latex: string): string {
-        return latex
-            .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1)/($2)')
-            .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+        let text = latex;
+
+        // 1. Remove structure modifiers
+        text = text.replace(/\\left/g, '');
+        text = text.replace(/\\right/g, '');
+        text = text.replace(/\\mathbf\{([^}]+)\}/g, '$1');
+        text = text.replace(/\\mathrm\{([^}]+)\}/g, '$1');
+        text = text.replace(/\\text\{([^}]+)\}/g, '$1');
+
+        // 2. Handle specific operators immediately
+        text = text.replace(/\\softmax/g, 'softmax');
+
+        // 3. Recursive Fraction Handler: \frac{A}{B} -> (A)/(B)
+        // We use a loop to handle nested fractions from inside out
+        while (text.includes('\\frac{')) {
+            text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+            // If the regex didn't change anything (due to nesting), break to avoid infinite loop
+            // In a real parser we'd count braces, but for this level of complexity,
+            // we assume standard depth.
+            if (text.includes('\\frac{')) {
+                // Fallback for deeper nesting if the simple generic regex fails
+                // Replace the innermost valid fraction
+                text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/, '($1)/($2)');
+            }
+        }
+
+        // 4. Square Roots
+        text = text.replace(/\\sqrt\{([^}]+)\}/g, '√($1)');
+
+        // 5. Subscripts and Superscripts
+        text = text
+            // Clean up variable names with subscripts, e.g., d_k
             .replace(/(\w)_\{([^}]+)\}/g, '$1_$2')
             .replace(/(\w)_(\w)/g, '$1_$2')
-            .replace(/\^2(?![0-9])/g, '²')
-            .replace(/\^3(?![0-9])/g, '³')
-            .replace(/\^\{([^}]+)\}/g, '^($1)')
-            .replace(/\^(\w)/g, '^$1')
-            .replace(/\\alpha/g, 'α')
-            .replace(/\\beta/g, 'β')
-            .replace(/\\gamma/g, 'γ')
-            .replace(/\\delta/g, 'δ')
-            .replace(/\\epsilon/g, 'ε')
-            .replace(/\\theta/g, 'θ')
-            .replace(/\\lambda/g, 'λ')
-            .replace(/\\mu/g, 'μ')
-            .replace(/\\pi/g, 'π')
-            .replace(/\\sigma/g, 'σ')
-            .replace(/\\omega/g, 'ω')
-            .replace(/\\times/g, '×')
-            .replace(/\\cdot/g, '·')
-            .replace(/\\div/g, '÷')
-            .replace(/\\pm/g, '±')
-            .replace(/\\leq/g, '≤')
-            .replace(/\\geq/g, '≥')
-            .replace(/\\neq/g, '≠')
-            .replace(/\\approx/g, '≈')
-            .replace(/\\infty/g, '∞')
-            .replace(/\\sum/g, 'Σ')
-            .replace(/\\prod/g, 'Π')
-            .replace(/\\int/g, '∫')
-            .replace(/\\log/g, 'log')
-            .replace(/\\ln/g, 'ln')
-            .replace(/\\sin/g, 'sin')
-            .replace(/\\cos/g, 'cos')
-            .replace(/\\tan/g, 'tan')
-            .replace(/\\exp/g, 'exp')
-            .replace(/\\max/g, 'max')
-            .replace(/\\min/g, 'min')
-            .replace(/\\lim/g, 'lim')
-            .replace(/\\text\{([^}]+)\}/g, '$1')
-            .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-            .replace(/\\mathbf\{([^}]+)\}/g, '$1')
-            .replace(/\\([a-zA-Z]+)/g, '$1')
-            .replace(/\{([^{}]+)\}/g, '$1')
-            .trim();
+            .replace(/QK\^T/g, 'QKᵀ') // Specific common case
+            .replace(/\^T/g, 'ᵀ')
+            .replace(/\^2/g, '²')
+            .replace(/\^3/g, '³')
+            .replace(/\^\{([^}]+)\}/g, '^($1)');
+
+        // 6. Greek & Symbols
+        const symbols: Record<string, string> = {
+            '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\epsilon': 'ε',
+            '\\theta': 'θ', '\\lambda': 'λ', '\\mu': 'μ', '\\pi': 'π', '\\sigma': 'σ',
+            '\\omega': 'ω', '\\times': '×', '\\cdot': '·', '\\div': '÷', '\\pm': '±',
+            '\\leq': '≤', '\\geq': '≥', '\\neq': '≠', '\\approx': '≈', '\\infty': '∞',
+            '\\sum': 'Σ', '\\prod': 'Π', '\\int': '∫', '\\sqrt': '√'
+        };
+
+        for (const [key, val] of Object.entries(symbols)) {
+            text = text.replaceAll(key, val);
+        }
+
+        // 7. Cleanup remaining braces and spaces
+        text = text.replace(/\{([^{}]+)\}/g, '$1');
+
+        return text.trim();
     }
 
     /**

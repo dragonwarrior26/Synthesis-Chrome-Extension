@@ -29,4 +29,4 @@ Synthesis uses the Google Gemini API to provide AI analysis.
 Since we do not store your data, there is nothing for us to delete. You have full control over your data by simply managing your local browser storage and API keys.
 
 ## 5. Contact
-For questions about this policy, please contact us at: [Insert Your Email/GitHub Issues Link]
+For questions about this policy, please contact us at: support@synthesisext.com

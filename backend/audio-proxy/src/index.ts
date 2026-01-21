@@ -5,6 +5,8 @@
  * This is required because browser extensions cannot directly access YouTube audio.
  */
 
+import { YtdlCore } from '@ybd-project/ytdl-core';
+
 export interface Env {
     ENVIRONMENT: string;
 }
@@ -86,73 +88,54 @@ export default {
  * Note: This is a simplified implementation. For production, consider using
  * a more robust solution like yt-dlp or a dedicated service.
  */
+/**
+ * Get audio stream info from YouTube video using the InnerTube API (Android Client).
+ * This is significantly more robust than scraping HTML.
+ */
+/**
+ * Get audio stream info from YouTube video using @ybd-project/ytdl-core.
+ * This library handles signature deciphering, client switching, and other complexity automatically.
+ */
 async function getAudioInfo(videoId: string): Promise<AudioInfo> {
     try {
-        // Fetch video page to get player response
-        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const response = await fetch(videoUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            },
+        const ytdl = new YtdlCore({
+            // Optional: configure clients if needed, but defaults are usually good
+            hl: 'en',
+            gl: 'US',
+            // Disable file cache because Workers don't have a writable file system
+            // This prevents "Invalid URL" errors when the library tries to read/write cache keys
+            disableFileCache: true, 
+            disableBasicCache: true
         });
 
-        if (!response.ok) {
-            return {
-                videoId,
-                audioUrl: '',
-                duration: 0,
-                format: '',
-                error: 'Failed to fetch video page',
-            };
-        }
+        // Use getFullInfo (instance method) instead of getInfo
+        // The library expects a full URL, not just an ID
+        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const info = await ytdl.getFullInfo(videoUrl);
 
-        const html = await response.text();
-
-        // Extract player response from page
-        const playerResponseMatch = html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/);
-
-        if (!playerResponseMatch) {
-            return {
-                videoId,
-                audioUrl: '',
-                duration: 0,
-                format: '',
-                error: 'Could not find player response',
-            };
-        }
-
-        const playerResponse = JSON.parse(playerResponseMatch[1]);
-
-        // Get video duration
-        const duration = parseInt(playerResponse.videoDetails?.lengthSeconds || '0', 10);
-
-        // Get adaptive formats (includes audio-only streams)
-        const adaptiveFormats = playerResponse.streamingData?.adaptiveFormats || [];
-
-        // Find best audio format (prefer m4a/mp4a for quality)
-        const audioFormats = adaptiveFormats.filter((f: any) =>
-            f.mimeType?.startsWith('audio/') && f.url
-        );
+        // Filter for audio-only formats (static method)
+        const audioFormats = YtdlCore.filterFormats(info.formats, 'audioonly');
 
         if (audioFormats.length === 0) {
-            return {
-                videoId,
-                audioUrl: '',
-                duration,
-                format: '',
-                error: 'No audio formats available (video may be restricted)',
-            };
+            throw new Error('No audio-only formats found');
         }
 
-        // Sort by bitrate and get the best one
-        audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-        const bestAudio = audioFormats[0];
+        // Select the format with the highest audio bitrate
+        // Gemini handles various qualities well, but 'highestaudio' ensures clarity.
+        // We manually sort if filterFormats doesn't sort by bitrate strictly.
+        audioFormats.sort((a: any, b: any) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
+
+        const bestFormat = audioFormats[0];
+
+        if (!bestFormat.url) {
+            throw new Error('Audio URL is missing in best format');
+        }
 
         return {
             videoId,
-            audioUrl: bestAudio.url,
-            duration,
-            format: bestAudio.mimeType?.split(';')[0] || 'audio/mp4',
+            audioUrl: bestFormat.url,
+            duration: Number(info.videoDetails.lengthSeconds),
+            format: bestFormat.mimeType?.split(';')[0] || 'audio/mp4',
         };
 
     } catch (error) {

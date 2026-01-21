@@ -6,6 +6,8 @@ create table public.profiles (
   avatar_url text,
   subscription_tier text default 'free',
   stripe_customer_id text,
+  stripe_subscription_id text,
+  subscription_expires_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
