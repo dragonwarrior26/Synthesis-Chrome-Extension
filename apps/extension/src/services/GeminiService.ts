@@ -140,16 +140,26 @@ export class GeminiService {
         // Build prompt (reuse core logic)
         const prompt = this.buildPrompt(tabs, query, mode, _depth, contentLimit)
 
+        console.log('[GeminiService] Calling ai-request Edge Function...')
+
         // Call Edge Function
         const { data, error } = await supabase.functions.invoke('ai-request', {
             body: { prompt }
         })
 
         if (error) {
+            console.error('[GeminiService] Edge Function Error:', error)
             if (error.message?.includes('Rate limit')) {
                 throw new Error(`Daily limit reached. Upgrade to Pro for higher limits.`)
             }
             throw new Error(`AI request failed: ${error.message}`)
+        }
+
+        console.log('[GeminiService] Edge Function Success. Data:', data)
+
+        if (!data?.response) {
+            console.error('[GeminiService] Empty response received:', data)
+            throw new Error('Received empty response from AI service.')
         }
 
         return data.response

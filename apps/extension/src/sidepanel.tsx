@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { FeatureGate } from "@/components/FeatureGate";
+import { UpgradePanel } from "@/components/UpgradePanel";
 import { Features } from "@/config/features";
 import { useTabManager } from "@/hooks/useTabManager";
 import { useSynthesis, type SynthesisMode } from "@/hooks/useSynthesis";
@@ -61,6 +62,7 @@ function SidePanelContent() {
 
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   // Vision State
   const [isVisionEnabled, setIsVisionEnabled] = useState(false);
@@ -209,7 +211,8 @@ function SidePanelContent() {
   };
 
   const handleAction = async (input: string, mode?: SynthesisMode) => {
-    if ((!apiKey && !import.meta.env.VITE_GEMINI_API_KEY) || isSynthesizing) return;
+    // API Key check removed here - handled by GeminiService routing
+    if (isSynthesizing) return;
 
     const tabsToQuery = getExtractedTabs();
     if (tabsToQuery.length === 0) {
@@ -532,12 +535,12 @@ function SidePanelContent() {
           )}
           <div className="w-px h-4 bg-slate-800 mx-1" />
 
-          {/* Upgrade Button (Placeholder) */}
+          {/* Upgrade Button */}
           <Button
             variant="ghost"
             size="sm"
             className="h-7 px-2 bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-500 hover:text-amber-400 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition-all"
-            onClick={() => alert("Pro Tier: Coming Soon! Enjoy all features for free during the preview.")}
+            onClick={() => setShowUpgrade(true)}
           >
             Upgrade
           </Button>
@@ -642,6 +645,21 @@ function SidePanelContent() {
                 placeholder="Enter your API Key..."
                 onChange={(e) => saveApiKey(e.target.value)}
               />
+            </div>
+          )}
+
+          {/* Upgrade Panel */}
+          {showUpgrade && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+              <div className="relative w-full max-w-sm bg-slate-900 rounded-xl border border-slate-800 shadow-2xl overflow-hidden animate-in zoom-in-95">
+                <button
+                  onClick={() => setShowUpgrade(false)}
+                  className="absolute top-2 right-2 p-1 text-slate-500 hover:text-white rounded-full transition-colors z-10"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <UpgradePanel onClose={() => setShowUpgrade(false)} />
+              </div>
             </div>
           )}
 
@@ -947,7 +965,7 @@ function SidePanelContent() {
           />
           <Button
             onClick={handleChatSubmit}
-            disabled={!chatInput.trim() || (!apiKey && !import.meta.env.VITE_GEMINI_API_KEY) || isSynthesizing}
+            disabled={!chatInput.trim() || isSynthesizing}
             size="icon"
             className="absolute right-2 top-1.5 h-8 w-8 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:bg-slate-800"
           >

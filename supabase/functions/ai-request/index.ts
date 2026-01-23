@@ -68,11 +68,14 @@ serve(async (req) => {
         // Call Gemini API with server-side key
         const geminiKey = Deno.env.get('GEMINI_API_KEY')
         if (!geminiKey) {
+            console.error('Missing GEMINI_API_KEY')
             throw new Error('Server API key not configured')
         }
 
+        console.log(`[Edge] Processing request for user ${user.id} (Tier: ${tier})`)
+
         const geminiResponse = await fetch(
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + geminiKey,
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + geminiKey,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -83,11 +86,34 @@ serve(async (req) => {
         )
 
         if (!geminiResponse.ok) {
-            throw new Error(`Gemini API error: ${geminiResponse.status}`)
+            const errorText = await geminiResponse.text()
+            console.error(`[Edge] Gemini API Error (${geminiResponse.status}):`, errorText)
+            throw new Error(`Gemini API error: ${geminiResponse.status} - ${errorText}`)
         }
 
         const geminiData = await geminiResponse.json()
-        const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+        // check for errors or safety blocks
+        const candidate = geminiData.candidates?.[0]
+        const responseText = candidate?.content?.parts?.[0]?.text
+
+        if (!responseText) {
+            console.error('Gemini Empty Response:', JSON.stringify(geminiData))
+
+            if (geminiData.promptFeedback?.blockReason) {
+                throw new Error(`AI blocked content: ${geminiData.promptFeedback.blockReason}`)
+            }
+
+            if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
+                throw new Error(`AI finished unexpectedly: ${candidate.finishReason}`)
+            }
+
+            if (geminiData.error) {
+                throw new Error(`Gemini Error: ${geminiData.error.message}`)
+            }
+
+            throw new Error('AI returned no content. Please try a different query.')
+        }
 
         // Log usage
         await supabase.from('ai_usage').insert({
