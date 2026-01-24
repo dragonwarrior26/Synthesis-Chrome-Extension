@@ -19,15 +19,31 @@ export const WaitlistForm = () => {
 
         setStatus("loading");
 
-        // TODO: Connect to Supabase later
-        // For now, simulate API call
-        setTimeout(() => {
-            console.log("Waitlist submission:", email);
+        try {
+            const response = await fetch('/api/waitlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ email }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to join waitlist');
+            }
+
             setStatus("success");
             setMessage("You're on the list! We'll be in touch.");
             setEmail("");
-        }, 1500);
+        } catch (error) {
+            setStatus("error");
+            setMessage(error instanceof Error ? error.message : "Something went wrong. Please try again.");
+            setTimeout(() => setStatus("idle"), 3000);
+        }
     };
+
 
     return (
         <div className="w-full max-w-md mx-auto">
