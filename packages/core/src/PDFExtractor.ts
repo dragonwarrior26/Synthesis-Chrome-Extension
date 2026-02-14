@@ -1,26 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// We need to set the worker source. 
-// In a Chrome Extension bundled with Vite, it's best to point to a local copy if possible, 
-// or use a CDN if CSP permits. 
-// For now, let's try a standard import. If workers invoke errors, we might need to bundle the worker.
-// A common trick is to use the cdn in development or a relative path in production.
-// However, since we are in a content script (sometimes restricted), getting the worker right is key.
-// Let's try explicitly importing the worker entry if possible, or setting it to the unpkg version for simplicity first,
-// but remember extensions block CDNs usually.
-
-// Best practice: The extension build should include valid worker file.
-// For the 'core' package, we just define the logic.
-// We will set workerSrc to null for now and let the consumer or auto-resolution handle it, 
-// or we explicitly set it to a known local path if we copy it.
-
-// Update: modern pdfjs-dist requires setting workerSrc.
-// We will assume the extension build process (Vite) can handle the worker import or we use the legacy no-worker build if needed (slow).
-// But let's try standard.
-// Actually, to ensure it works in the extension without complex worker config, 
-// we can use `pdfjs-dist/legacy/build/pdf` if we encounter issues, but let's stick to standard `pdfjs-dist`.
-
-// Only setting workerSrc if window is defined (browser)
 // MV3 Compliant: NEVER use CDN fallback
 if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
@@ -31,7 +10,6 @@ if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
             pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.mjs');
         } else {
             // Non-extension environments: disable worker (runs on main thread, slower but compliant)
-            // This avoids any CDN references
             pdfjsLib.GlobalWorkerOptions.workerSrc = '';
         }
     } catch (e) {
@@ -52,24 +30,58 @@ export const PDFExtractor = {
      * Fetches the PDF and extracts text from all pages.
      */
     async extract(source: string | Uint8Array, maxPages = 20): Promise<{ title: string; content: string } | null> {
+        console.log(`[PDFExtractor] Starting extraction. API: ${pdfjsLib.version}. Worker: ${pdfjsLib.GlobalWorkerOptions.workerSrc}`);
+
         try {
+            // Header check for Uint8Array inputs to catch corruption early
+            if (source instanceof Uint8Array) {
+                const head = String.fromCharCode(source[0], source[1], source[2], source[3]);
+                console.log(`[PDFExtractor] Binary header: ${head}`);
+                if (head !== '%PDF') {
+                    throw new Error(`Invalid PDF header: ${head}. The file might be corrupted or not a valid PDF.`);
+                }
+            }
+
             const loadingTask = (typeof source === 'string')
                 ? pdfjsLib.getDocument(source)
                 : pdfjsLib.getDocument({ data: source });
+
+            loadingTask.onPassword = () => {
+                console.warn("[PDFExtractor] Password protected PDF detected");
+            };
+
             const pdf = await loadingTask.promise;
+            console.log(`[PDFExtractor] PDF loaded successfully. Pages: ${pdf.numPages}`);
+
+            if (pdf.numPages === 0) {
+                throw new Error("PDF document contains no pages.");
+            }
 
             let fullText = '';
             const numPages = Math.min(pdf.numPages, maxPages);
 
             for (let i = 1; i <= numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                // Join items with space, avoiding excessive newlines
-                const pageText = textContent.items
-                    .map((item: any) => item.str)
-                    .join(' ');
+                try {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
 
-                fullText += `[Page ${i}]\n${pageText}\n\n`;
+                    // Join items with space. Some items in v5 might not have 'str' (TextMarkedContent)
+                    const pageText = textContent.items
+                        .map((item: any) => item.str || '')
+                        .filter((s: string) => s.trim().length > 0)
+                        .join(' ');
+
+                    if (pageText.trim().length > 0) {
+                        fullText += `[Page ${i}]\n${pageText}\n\n`;
+                    }
+                } catch (pageErr) {
+                    console.error(`[PDFExtractor] Failed to extract page ${i}:`, pageErr);
+                }
+            }
+
+            const trimmedContent = fullText.trim();
+            if (trimmedContent.length === 0) {
+                throw new Error("No text content could be extracted from pages. This PDF might be image-based or scanned. Please try OCR if needed.");
             }
 
             // Metadata (Title)
@@ -78,26 +90,22 @@ export const PDFExtractor = {
                 const metadata = await pdf.getMetadata();
                 if (metadata && metadata.info && (metadata.info as any).Title) {
                     title = (metadata.info as any).Title;
-                } else {
-                    // Fallback to filename
-                    let filename = 'PDF Document';
-                    if (typeof source === 'string') {
-                        const parts = source.split('/').pop()?.split('#')[0].split('?')[0];
-                        if (parts) filename = decodeURIComponent(parts);
-                    }
-                    title = filename;
+                } else if (typeof source === 'string') {
+                    const parts = source.split('/').pop()?.split('#')[0].split('?')[0];
+                    if (parts) title = decodeURIComponent(parts);
                 }
             } catch (e) {
-                // Ignore metadata errors
+                console.warn('[PDFExtractor] Metadata extraction failed', e);
             }
 
             return {
                 title,
-                content: fullText.trim(),
+                content: trimmedContent,
             };
         } catch (error) {
-            console.error("PDF Extraction Failed:", error);
-            return null;
+            console.error("PDF Extraction Core Error:", error);
+            // Re-throw so the calling application (useTabManager) can display the descriptive error
+            throw error;
         }
     }
 };

@@ -62,10 +62,10 @@ Deno.serve(async (req: Request) => {
         let limit = RATE_LIMITS[tier]
         let count = 0;
 
-        // User-based rate limiting
+        // User-based rate limiting (uses SERVICE_ROLE_KEY to bypass RLS)
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         )
 
         const { count: userCount, error: rateError } = await supabase

@@ -38,7 +38,7 @@ import { SyncService } from "@/services/SyncService";
 
 function SidePanelContent() {
   const { user, signInWithGoogle, signOut, tier } = useAuth();
-  const { activeTabs, extractedData, isExtracting, extractAll, clearData } = useTabManager();
+  const { activeTabs, extractedData, syncErrors, isExtracting, extractAll, clearData } = useTabManager();
   const { apiKey, saveApiKey, performSynthesis, isSynthesizing } = useSynthesis();
 
   // Debug Log
@@ -890,38 +890,62 @@ function SidePanelContent() {
                   </div>
                 ) : (
                   <>
-                    {extractedCount === 0 && !isExtracting ? (
-                      <div className="flex items-center gap-3 py-2">
-                        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
-                          <Search className="w-4 h-4 text-slate-500" />
+                    <div className="space-y-2 max-h-[150px] overflow-y-auto custom-scrollbar">
+                      {activeTabs.length === 0 && extractedYouTubeContent.length === 0 && extractedRawContent.length === 0 && !isExtracting ? (
+                        <div className="flex items-center gap-3 py-2">
+                          <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                            <Search className="w-4 h-4 text-slate-500" />
+                          </div>
+                          <span className="text-sm text-slate-400">No content found. Open some tabs, YouTube videos, or add notes.</span>
                         </div>
-                        <span className="text-sm text-slate-400">No content synced. Open Tabs, YouTube Videos, or attach Notes.</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar">
-                        {activeTabs.map(tab => (
-                          <div key={tab.id} className="flex items-center gap-3">
-                            <FileText className="w-4 h-4 text-slate-600" />
-                            <span className="text-sm text-slate-300 truncate flex-1">{tab.title}</span>
-                            {extractedData[tab.id] && <CheckCircle2 className="w-4 h-4 text-blue-500" />}
-                          </div>
-                        ))}
-                        {extractedYouTubeContent.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-3">
-                            <Youtube className="w-4 h-4 text-red-600" />
-                            <span className="text-sm text-slate-300 truncate flex-1">{item.title}</span>
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          </div>
-                        ))}
-                        {extractedRawContent.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-3">
-                            <FileType className="w-4 h-4 text-orange-600" />
-                            <span className="text-sm text-slate-300 truncate flex-1">{item.title}</span>
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      ) : (
+                        <>
+                          {/* Active Browser Tabs */}
+                          {activeTabs.map(tab => (
+                            <div key={tab.id} className="flex flex-col gap-0.5 py-1 group">
+                              <div className="flex items-center gap-3">
+                                <FileText className={`w-4 h-4 ${extractedData[tab.id] ? "text-blue-500" : syncErrors[tab.id] ? "text-red-500" : "text-slate-600"}`} />
+                                <span className={`text-sm truncate flex-1 ${extractedData[tab.id] ? "text-slate-200" : syncErrors[tab.id] ? "text-red-400" : "text-slate-500"}`}>
+                                  {tab.title}
+                                </span>
+                                {isExtracting && !extractedData[tab.id] && !syncErrors[tab.id] ? (
+                                  <Loader2 className="w-4 h-4 text-blue-500/50 animate-spin" />
+                                ) : extractedData[tab.id] ? (
+                                  <CheckCircle2 className="w-4 h-4 text-blue-500" />
+                                ) : syncErrors[tab.id] ? (
+                                  <X className="w-4 h-4 text-red-500" />
+                                ) : (
+                                  <div className="w-4 h-4 rounded-full border border-slate-800" />
+                                )}
+                              </div>
+                              {syncErrors[tab.id] && (
+                                <div className="pl-7 text-[10px] text-red-500/80 leading-tight truncate" title={syncErrors[tab.id]}>
+                                  {syncErrors[tab.id]}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* YouTube Content */}
+                          {extractedYouTubeContent.map((item, idx) => (
+                            <div key={`yt-${idx}`} className="flex items-center gap-3 py-1">
+                              <Youtube className="w-4 h-4 text-red-600" />
+                              <span className="text-sm text-slate-200 truncate flex-1">{item.title}</span>
+                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            </div>
+                          ))}
+
+                          {/* Raw Notes */}
+                          {extractedRawContent.map((item, idx) => (
+                            <div key={`raw-${idx}`} className="flex items-center gap-3 py-1">
+                              <FileType className="w-4 h-4 text-orange-600" />
+                              <span className="text-sm text-slate-200 truncate flex-1">{item.title}</span>
+                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
                     {!user && !apiKey ? (
                       <Button
                         onClick={signInWithGoogle}
@@ -932,7 +956,7 @@ function SidePanelContent() {
                     ) : (
                       <Button
                         onClick={extractAll}
-                        disabled={isExtracting}
+                        disabled={isExtracting || activeTabs.length === 0}
                         className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
                       >
                         {isExtracting ? (
@@ -1065,7 +1089,7 @@ function SidePanelContent() {
           </Button>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

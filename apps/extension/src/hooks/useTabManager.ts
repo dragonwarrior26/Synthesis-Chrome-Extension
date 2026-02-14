@@ -11,6 +11,7 @@ export interface TabData {
 export function useTabManager() {
     const [activeTabs, setActiveTabs] = useState<TabData[]>([])
     const [extractedData, setExtractedData] = useState<Record<number, ExtractedContent>>({})
+    const [syncErrors, setSyncErrors] = useState<Record<number, string>>({})
     const [isExtracting, setIsExtracting] = useState(false)
 
     useEffect(() => {
@@ -43,6 +44,11 @@ export function useTabManager() {
 
     const extractFromTab = async (tabId: number) => {
         setIsExtracting(true)
+        setSyncErrors(prev => {
+            const next = { ...prev };
+            delete next[tabId];
+            return next;
+        });
         try {
             // Find the tab info
             const tab = activeTabs.find(t => t.id === tabId);
@@ -81,12 +87,16 @@ export function useTabManager() {
                 try {
                     const u = new URL(url);
                     const path = u.pathname.toLowerCase();
-                    const result = path.endsWith('.pdf') || (u.hostname.includes('arxiv.org') && path.startsWith('/pdf/'));
+                    const isLocalPdf = url.startsWith('file://') && path.endsWith('.pdf');
+                    const result = path.endsWith('.pdf') ||
+                        isLocalPdf ||
+                        (u.hostname.includes('arxiv.org') && path.startsWith('/pdf/'));
                     console.log(`[useTabManager] Check Result: ${result} (path=${path})`);
                     return result;
                 } catch (e) {
                     console.log(`[useTabManager] Check Error`, e);
-                    return url.toLowerCase().endsWith('.pdf');
+                    const lowerUrl = url.toLowerCase().split('?')[0].split('#')[0];
+                    return lowerUrl.endsWith('.pdf') || url.startsWith('file:///');
                 }
             };
 
@@ -94,28 +104,48 @@ export function useTabManager() {
                 console.log(`[useTabManager] Detected PDF URL: ${tab.url} - Entering execution block`);
 
                 try {
-                    // Fetch via background to bypass CORS in sidepanel
-                    const response = await chrome.runtime.sendMessage({
-                        type: 'FETCH_PDF_BINARY',
-                        url: tab.url
-                    }).catch(e => {
-                        console.error("[useTabManager] Initial Background connection failed:", e);
-                        throw e;
+                    // Fetch via background with 15s timeout
+                    const response = await new Promise<any>((resolve, reject) => {
+                        const timeout = setTimeout(() => reject(new Error('PDF fetch timed out (15s)')), 15000);
+                        chrome.runtime.sendMessage({
+                            type: 'FETCH_PDF_BINARY',
+                            url: tab.url
+                        }, (res) => {
+                            clearTimeout(timeout);
+                            if (chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message));
+                            } else {
+                                resolve(res);
+                            }
+                        });
                     });
 
-                    if (response.success && response.data) {
-                        // Convert base64 back to Uint8Array
-                        const binaryString = atob(response.data);
-                        const len = binaryString.length;
-                        const bytes = new Uint8Array(len);
-                        for (let i = 0; i < len; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
+                    if (response?.success && response?.data) {
+                        let bytes: Uint8Array;
+
+                        // Handle both direct Uint8Array and the case where it might be serialized as a numeric object
+                        if (response.data instanceof Uint8Array) {
+                            bytes = response.data;
+                        } else if (typeof response.data === 'object') {
+                            // Fallback for cases where structured cloning might have serialized it as a numeric object
+                            bytes = new Uint8Array(Object.values(response.data));
+                        } else {
+                            throw new Error('Received invalid binary data format');
                         }
 
-                        console.log(`[useTabManager] Fetched PDF data via background. Size: ${len}`);
+                        console.log(`[useTabManager] PDF bytes received. Length: ${bytes.length}`);
+
+                        // Basic header check: %PDF
+                        const header = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+                        if (header !== '%PDF') {
+                            console.error(`[useTabManager] Invalid PDF header: ${header}`);
+                            throw new Error('Fetched data is not a valid PDF document');
+                        }
+
+                        console.log(`[useTabManager] PDF header verified. Extracting text...`);
                         const pdfData = await PDFExtractor.extract(bytes);
 
-                        if (pdfData) {
+                        if (pdfData && pdfData.content) {
                             console.log(`[useTabManager] Successfully extracted PDF: ${pdfData.title}`);
                             setExtractedData((prev) => ({
                                 ...prev,
@@ -132,13 +162,15 @@ export function useTabManager() {
                             }));
                             return; // Success! Stop here.
                         } else {
-                            console.error('[useTabManager] PDF Extraction returned null');
+                            throw new Error('PDF extraction returned no text');
                         }
                     } else {
-                        console.error('[useTabManager] Background PDF fetch failed:', response.error);
+                        throw new Error(response?.error || 'Failed to fetch PDF binary');
                     }
                 } catch (err) {
-                    console.error('[useTabManager] Error extracting PDF:', err);
+                    console.error('[useTabManager] PDF sync failed:', err);
+                    setSyncErrors(prev => ({ ...prev, [tabId]: (err as Error).message }));
+                    return; // Stop on PDF error
                 }
 
                 console.log('[useTabManager] Sidepanel PDF extraction failed. Falling back to Content Script...');
@@ -174,12 +206,14 @@ export function useTabManager() {
 
     const clearData = () => {
         setExtractedData({})
+        setSyncErrors({})
         setIsExtracting(false)
     }
 
     return {
         activeTabs,
         extractedData,
+        syncErrors,
         isExtracting,
         extractFromTab,
         extractAll,

@@ -33,6 +33,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
         } as any,
       ],
       extractedData: {},
+      syncErrors: {},
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,
@@ -79,6 +80,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
           length: 100,
         } as any,
       },
+      syncErrors: {},
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,
@@ -99,6 +101,7 @@ describe("Smoke Test: Synthesis Extension UI Flow", () => {
     vi.mocked(useTabManagerHook.useTabManager).mockReturnValue({
       activeTabs: [{ id: 1, title: "Test Tab" } as any],
       extractedData: { 1: { title: "Test Tab" } as any },
+      syncErrors: {},
       isExtracting: false,
       extractAll: mockExtractAll,
       extractFromTab: mockExtractFromTab,

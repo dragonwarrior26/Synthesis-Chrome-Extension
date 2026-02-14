@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { type SynthesisMode, type ExtractedContent, GeminiService as CoreGemini } from '@synthesis/core'
 import { TierService } from './TierService'
+import { RateLimiter } from './RateLimiter'
 import { logger } from './LoggingService'
 
 /**
@@ -21,6 +22,12 @@ export class GeminiService {
     ): Promise<string> {
         const tier = await TierService.getCurrentTier();
         logger.info('[GeminiService] Synthesis requested. Tier:', tier);
+
+        // Rate limit check (ALL tiers)
+        const rateCheck = await RateLimiter.check();
+        if (!rateCheck.allowed) {
+            throw new Error(`Daily limit of ${rateCheck.limit} requests reached. You have used all ${rateCheck.limit} requests for today. Please try again tomorrow.`);
+        }
 
         if (tier === 'byok') {
             const apiKey = await TierService.getStoredApiKey();
@@ -45,6 +52,8 @@ export class GeminiService {
         for await (const chunk of stream) {
             fullResponse += chunk;
         }
+        // Increment usage after successful completion
+        await RateLimiter.increment();
         return fullResponse;
     }
 
@@ -64,6 +73,13 @@ export class GeminiService {
         const tier = await TierService.getCurrentTier();
         console.log('[GeminiService] DEBUG: Detected tier:', tier);
         logger.info('[GeminiService] Stream synthesis requested. Tier:', tier);
+
+        // Rate limit check (ALL tiers)
+        const rateCheck = await RateLimiter.check();
+        if (!rateCheck.allowed) {
+            yield `⚠️ **Daily limit reached.** You have used all ${rateCheck.limit} requests for today. Please try again tomorrow.`;
+            return;
+        }
 
         if (tier === 'byok') {
             console.log('[GeminiService] DEBUG: Taking BYOK path...');
@@ -87,6 +103,8 @@ export class GeminiService {
             );
 
             yield* streamGenerator;
+            // Increment usage after successful BYOK stream
+            await RateLimiter.increment();
             return;
         }
 
@@ -97,6 +115,8 @@ export class GeminiService {
         for await (const chunk of stream) {
             yield chunk;
         }
+        // Increment usage after successful Edge Function stream
+        await RateLimiter.increment();
     }
 
     /**
