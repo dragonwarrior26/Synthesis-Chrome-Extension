@@ -13,7 +13,7 @@ export class GeminiService {
 
     constructor(apiKey: string) {
         const genAI = new GoogleGenerativeAI(apiKey)
-        this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+        this.model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
     }
 
     async synthesize(
@@ -22,7 +22,7 @@ export class GeminiService {
         mode: SynthesisMode = 'summary',
         imageData?: string,
         depth: 'standard' | 'deep' = 'standard',
-        contentLimit: number = 10000
+        contentLimit: number = 100000
     ): Promise<string> {
         const prompt = this.buildPrompt(tabs, query, mode, [], imageData, depth, contentLimit)
         const result = await this.model.generateContent(prompt)
@@ -36,7 +36,7 @@ export class GeminiService {
         chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
         imageData?: string,
         depth: 'standard' | 'deep' = 'standard',
-        contentLimit: number = 10000
+        contentLimit: number = 100000
     ): Promise<AsyncGenerator<string>> {
         const prompt = this.buildPrompt(tabs, query, mode, chatHistory, imageData, depth, contentLimit)
         const result = await this.model.generateContentStream(prompt)
@@ -168,7 +168,7 @@ Instructions:
 `
     }
 
-    private buildContext(tabs: ExtractedContent[], contentLimit: number = 10000): string {
+    private buildContext(tabs: ExtractedContent[], contentLimit: number = 100000): string {
         // Calculate per-tab limit to distribute content evenly
         const perTabLimit = Math.floor(contentLimit / Math.max(tabs.length, 1));
 
@@ -193,17 +193,26 @@ You are "Synthesis", a helpful Research Assistant.
 - If the user asks for math, use LaTeX ($...$), but simple text explanations are also fine.
 `,
             summary: `
-You are "Synthesis". Create a **Concise Research Summary**.
+You are "Synthesis". Create a **Visual Research Summary**.
 
-# FORMAT
-1. **Summary**: A clear, paragraph-form summary of the main points.
-2. **Key Takeaways**: A bulleted list of the most important facts.
+# FORMATTING
+1. **Title**: 📝 [Engaging Title]
+2. **Executive Summary**: A clear, paragraph-form summary.
+3. **Key Takeaways**:
+   - 🎯 [Point 1]
+   - ⚡ [Point 2]
+   - 💡 [Point 3]
+4. **Key Entities Table** (Markdown):
+   | Entity | Role/Significance |
+   | :--- | :--- |
+   | [Name] | [Details] |
 `,
             table: `
 You are "Synthesis". Create a **Comparison Table**.
 
 1. Create a Markdown table comparing the items in the text.
 2. Columns should be: Feature, Details, Notes.
+3. **NO CODE BLOCKS**: Do NOT wrap the table in \`\`\` or \`\`\`markdown. Return raw table syntax only.
 `,
             proscons: `
 You are "Synthesis". List the **Pros and Cons**.
@@ -303,7 +312,7 @@ Write a **Critical Technical Analysis** on the provided content.
         chatHistory: { role: 'user' | 'assistant', content: string }[] = [],
         imageData?: string,
         depth: 'standard' | 'deep' = 'standard',
-        contentLimit: number = 10000
+        contentLimit: number = 100000
     ): any[] {
         const context = this.buildContext(tabs, contentLimit)
 

@@ -16,7 +16,7 @@ I have audited the "Synthesis - Intelligent Tab Manager" extension against **all
 ### 1. Critical Technical Violations (Addressed)
 | Violation ID | Category | Status | Notes |
 | :--- | :--- | :--- | :--- |
-| **Purple Potassium** | **Use of Permissions** | **✅ FIXED** | Removed `scripting`. Removed `activeTab`. usage of `tabs`, `sidePanel`, `storage`, `identity` is verified and justified. |
+| **Purple Potassium** | **Use of Permissions** | **✅ FIXED** | Retained `scripting` (Required for YouTube content injection). Removed `activeTab`. Usage of `tabs`, `sidePanel`, `storage`, `identity` is verified and justified. |
 | **Blue Argon** | **MV3 Requirements** | **✅ PASS** | No remote code (e.g., `eval`, `script src`) found. Logic is self-contained. |
 | **Yellow Magnesium** | **Functionality** | **✅ PASS** | Build assets (`icon-128.png`, `sidepanel.html`) are present. Code compiles. |
 | **Yellow Zinc** | **Missing Metadata** | **✅ FIXED** | Added missing `description` field to `manifest.json`. |

@@ -49,11 +49,17 @@ export class ExportService {
 
                 if (isSeparator) return; // Skip separator line
 
-                const cells = trimmed.split('|').map(c => c.trim()).filter(c => c.length > 0 || trimmed.endsWith('|'));
-                const cleanCells = cells.filter(c => c !== '');
+                // Correctly split cells while preserving empty ones (alignment)
+                let cellValues = trimmed.split('|');
+
+                // Remove first element if line starts with | (standard markdown)
+                if (trimmed.startsWith('|')) cellValues.shift();
+                // Remove last element if line ends with | (standard markdown)
+                if (trimmed.endsWith('|')) cellValues.pop();
 
                 html += '<tr>';
-                cleanCells.forEach((cell) => {
+                cellValues.forEach((rawCell) => {
+                    const cell = rawCell.trim();
                     const nextLine = lines[index + 1]?.trim();
                     const isNextSeparator = nextLine?.startsWith('|') && nextLine?.includes('---');
 

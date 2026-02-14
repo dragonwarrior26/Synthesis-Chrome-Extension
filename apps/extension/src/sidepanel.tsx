@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { FeatureGate } from "@/components/FeatureGate";
 import { UpgradePanel } from "@/components/UpgradePanel";
-import { Features } from "@/config/features";
+import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
+import { logger } from "@/services/LoggingService";
+
 import { useTabManager } from "@/hooks/useTabManager";
 import { useSynthesis, type SynthesisMode } from "@/hooks/useSynthesis";
 import { type ExtractedContent, YouTubeExtractor, type YouTubeVideoInfo } from "@synthesis/core";
@@ -35,9 +37,15 @@ import { LogOut, Cloud } from "lucide-react";
 import { SyncService } from "@/services/SyncService";
 
 function SidePanelContent() {
-  const { user, signInWithGoogle, signOut } = useAuth();
+  const { user, signInWithGoogle, signOut, tier } = useAuth();
   const { activeTabs, extractedData, isExtracting, extractAll, clearData } = useTabManager();
   const { apiKey, saveApiKey, performSynthesis, isSynthesizing } = useSynthesis();
+
+  // Debug Log
+  useEffect(() => {
+    console.log('[SidePanel] User Tier:', tier);
+    console.log('[SidePanel] User:', user ? user.email : 'None');
+  }, [tier, user]);
 
   // State
   const [chatInput, setChatInput] = useState("");
@@ -50,6 +58,9 @@ function SidePanelContent() {
   // YouTube State
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideoInfo[]>([]);
+
+  // Refs
+  const lastSyncedContentRef = useRef<string>("");
   const [isExtractingYouTube, setIsExtractingYouTube] = useState(false);
   const [extractedYouTubeContent, setExtractedYouTubeContent] = useState<ExtractedContent[]>([]);
   const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
@@ -172,12 +183,19 @@ function SidePanelContent() {
       if (chatMessages.length > 0) {
         const title = activeTabs[0]?.title || "Research Session";
         const content = JSON.stringify(chatMessages.filter(m => !m.isError && m.content));
-        await SyncService.pushSynthesis({
-          title,
-          url: activeTabs[0]?.url || "https://synthesis.ai",
-          content,
-          source_type: 'web'
-        });
+
+        // Deduplication: Skip if content hasn't changed since last sync
+        if (content === lastSyncedContentRef.current) {
+          console.log("Cloud Sync: Content unchanged, skipping push.");
+        } else {
+          await SyncService.pushSynthesis({
+            title,
+            url: activeTabs[0]?.url || "https://synthesis.ai",
+            content,
+            source_type: 'web'
+          });
+          lastSyncedContentRef.current = content;
+        }
       }
 
       // 2. Pull history (future: populate a history sidebar)
@@ -213,6 +231,17 @@ function SidePanelContent() {
   const handleAction = async (input: string, mode?: SynthesisMode) => {
     // API Key check removed here - handled by GeminiService routing
     if (isSynthesizing) return;
+
+    // Auth Barrier: Prevent action if user is not signed in and not using BYOK (conceptually)
+    // Actually, Free/Pro requires Auth. BYOK requires just Key. 
+    // Ideally, we enforce Auth for everyone except pure local BYOK, but current architecture ties everything to Auth.
+    if (!user && !apiKey) {
+      setChatMessages(prev => [...prev, {
+        role: "assistant",
+        content: "⚠️ **Authentication Required**\n\nPlease **Sign In** (top right) to use the AI features."
+      }]);
+      return;
+    }
 
     const tabsToQuery = getExtractedTabs();
     if (tabsToQuery.length === 0) {
@@ -261,12 +290,15 @@ function SidePanelContent() {
         isDeepMode ? 'deep' : 'standard'
       );
     } catch (error) {
+      console.error("[SidePanel] Action failed:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       setChatMessages((prev) => {
         const newHistory = [...prev];
         const lastMsg = newHistory[newHistory.length - 1];
-        lastMsg.content = `**Error**: ${errorMessage}\n\n*Check console for details.*`;
-        lastMsg.isError = true;
+        if (lastMsg) {
+          lastMsg.content = `**Error**: ${errorMessage}\n\n*Check console for details.*`;
+          lastMsg.isError = true;
+        }
         return newHistory;
       });
     }
@@ -395,9 +427,16 @@ function SidePanelContent() {
 
         // Step 4: If still no captions and we have a tab, try audio capture (Pro feature)
         if (!transcript && tabs.length > 0 && tabs[0].id) {
-          const keyToUse = (apiKey || import.meta.env.VITE_GEMINI_API_KEY) as string;
+          // Tier Check: Audio capture is a Pro feature
+          if (tier !== 'pro' && tier !== 'byok') {
+            alert(`Speech-to-text is a Pro feature. Upgrade to transcribe "${video.title}".`);
+            continue;
+          }
 
-          if (!keyToUse) {
+          const keyToUse = apiKey;
+
+          if (!keyToUse && tier !== 'pro') {
+            // Pro users use backend proxy, BYOK users need key
             alert(`No captions found for "${video.title}". API key required for speech-to-text.`);
             continue;
           }
@@ -405,7 +444,7 @@ function SidePanelContent() {
           const tabId = tabs[0].id;
 
           // Get tier-based audio capture limit
-          const hasByok = !!keyToUse && keyToUse !== import.meta.env.VITE_GEMINI_API_KEY;
+          const hasByok = tier === 'byok';
           const { getAudioCaptureLimit } = await import('@/config/features');
           const maxDurationSeconds = getAudioCaptureLimit(hasByok);
           console.log(`[Sync] Trying audio capture for ${video.videoId} (max ${maxDurationSeconds}s)...`);
@@ -460,7 +499,7 @@ function SidePanelContent() {
         }
       }
 
-      setExtractedYouTubeContent(prev => [...prev, ...newContent]);
+      setExtractedYouTubeContent(newContent);
 
       if (newContent.length > 0) {
         alert(`Successfully synced ${newContent.length} videos!`);
@@ -514,12 +553,52 @@ function SidePanelContent() {
   return (
     <div className="dark h-screen flex flex-col bg-slate-950 font-sans text-slate-50 selection:bg-blue-500/30">
       {/* Header */}
-      <header className="flex items-center justify-between px-5 py-4 bg-slate-950 border-b border-slate-900 sticky top-0 z-20">
-        <h1 className="text-base font-semibold tracking-tight text-slate-50 flex items-center gap-2">
-          AI Research Assistant
-        </h1>
+      <header className="flex flex-col px-5 py-4 bg-slate-950 border-b border-slate-900 sticky top-0 z-20 gap-3">
+        {/* Row 1: Brand & Auth */}
+        <div className="flex items-center justify-between w-full">
+          <h1 className="text-base font-semibold tracking-tight text-slate-50 flex items-center gap-2">
+            AI Research Assistant
+          </h1>
+          <div className="flex items-center gap-2">
+            {/* Upgrade Button: Only for Free Tier Users who are logged in */}
+            {user && tier === 'free' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-500 hover:text-amber-400 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition-all"
+                onClick={() => setShowUpgrade(true)}
+              >
+                Upgrade
+              </Button>
+            )}
+
+            {/* Auth Actions */}
+            {user ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={signOut}
+                className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                title={`Signed in as ${user.email}`}
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={signInWithGoogle}
+                className="h-8 px-3 bg-slate-100 text-slate-900 hover:bg-white transition-colors text-xs font-medium"
+              >
+                Sign In
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Tools & Utilities */}
         <div className="flex items-center gap-1">
-          {Features.visionMode && (
+          <FeatureGate feature="visionMode" showLocked={true}>
             <Button
               variant="ghost"
               size="icon"
@@ -532,18 +611,7 @@ function SidePanelContent() {
             >
               {isVisionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
             </Button>
-          )}
-          <div className="w-px h-4 bg-slate-800 mx-1" />
-
-          {/* Upgrade Button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-500 hover:text-amber-400 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition-all"
-            onClick={() => setShowUpgrade(true)}
-          >
-            Upgrade
-          </Button>
+          </FeatureGate>
 
           <div className="w-px h-4 bg-slate-800 mx-1" />
 
@@ -570,6 +638,7 @@ function SidePanelContent() {
               <div className="w-px h-4 bg-slate-800 mx-1" />
             </>
           )}
+
           <Button
             variant="ghost"
             size="icon"
@@ -579,50 +648,29 @@ function SidePanelContent() {
           >
             <RotateCcw className="w-4 h-4" />
           </Button>
+
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setShowSettings(!showSettings)}
             className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+            title="Settings"
           >
             <Settings className="w-4 h-4" />
           </Button>
 
-          <div className="w-px h-4 bg-slate-800 mx-1" />
+          <div className="flex-1" />
 
-          {user ? (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={signOut}
-                className="h-8 w-8 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
-                title={`Signed in as ${user.email}`}
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
-
-              <div className="w-px h-4 bg-slate-800 mx-1" />
-
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleCloudSync}
-                disabled={isCloudSyncing}
-                className={`h-8 w-8 rounded-lg transition-all ${isCloudSyncing ? "animate-pulse text-blue-400" : "text-green-400 hover:bg-slate-800"}`}
-                title={isCloudSyncing ? "Syncing..." : "Sync to Cloud"}
-              >
-                <Cloud className="w-4 h-4" />
-              </Button>
-            </>
-          ) : (
+          {user && (
             <Button
               variant="ghost"
-              size="sm"
-              onClick={signInWithGoogle}
-              className="h-8 px-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors text-xs font-medium"
+              size="icon"
+              onClick={handleCloudSync}
+              disabled={isCloudSyncing}
+              className={`h-8 w-8 rounded-lg transition-all ${isCloudSyncing ? "animate-pulse text-blue-400" : "text-green-400 hover:bg-slate-800"}`}
+              title={isCloudSyncing ? "Syncing..." : "Sync to Cloud"}
             >
-              Sign In
+              <Cloud className="w-4 h-4" />
             </Button>
           )}
         </div>
@@ -645,6 +693,28 @@ function SidePanelContent() {
                 placeholder="Enter your API Key..."
                 onChange={(e) => saveApiKey(e.target.value)}
               />
+              <div className="pt-2 border-t border-slate-800">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const logs = logger.exportLogs();
+                    const blob = new Blob([logs], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `synthesis-debug-logs-${new Date().toISOString()}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="w-full text-xs border-slate-700 hover:bg-slate-800 text-slate-400"
+                >
+                  <Download className="w-3 h-3 mr-2" />
+                  Export Debug Logs
+                </Button>
+              </div>
             </div>
           )}
 
@@ -670,14 +740,12 @@ function SidePanelContent() {
             <div className="bg-slate-900 rounded-xl border border-slate-800 p-1 overflow-hidden">
               {/* Tabs - Single Line Layout */}
               <div className="flex items-center border-b border-slate-800 mb-3">
-                <FeatureGate feature="googleSearch">
-                  <button
-                    onClick={() => setActiveSourceTab('text')}
-                    className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center ${activeSourceTab === 'text' ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
-                  >
-                    Notes
-                  </button>
-                </FeatureGate>
+                <button
+                  onClick={() => setActiveSourceTab('text')}
+                  className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center ${activeSourceTab === 'text' ? 'border-orange-500 text-orange-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
+                >
+                  Notes
+                </button>
                 <button
                   onClick={() => setActiveSourceTab('sources')}
                   className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center ${activeSourceTab === 'sources' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-400'}`}
@@ -854,15 +922,24 @@ function SidePanelContent() {
                         ))}
                       </div>
                     )}
-                    <Button
-                      onClick={extractAll}
-                      disabled={isExtracting}
-                      className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
-                    >
-                      {isExtracting ? (
-                        <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</span>
-                      ) : "Sync Content"}
-                    </Button>
+                    {!user && !apiKey ? (
+                      <Button
+                        onClick={signInWithGoogle}
+                        className="w-full mt-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium h-10 rounded-lg shadow-lg border border-slate-700 transition-all"
+                      >
+                        <LogOut className="w-4 h-4 mr-2 rotate-180" /> Sign In to Sync
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={extractAll}
+                        disabled={isExtracting}
+                        className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-medium h-10 rounded-lg shadow-lg shadow-blue-900/20 transition-all"
+                      >
+                        {isExtracting ? (
+                          <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</span>
+                        ) : "Sync Content"}
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
@@ -874,7 +951,14 @@ function SidePanelContent() {
             {chatMessages.map((msg, i) => {
               const isStreaming = !msg.content && i === chatMessages.length - 1 && isSynthesizing;
 
-              if (!msg.content && !msg.isError && !isStreaming) return null;
+              // Debug: Show if message is empty but finished
+              if (!msg.content && !msg.isError && !isStreaming) {
+                return (
+                  <div key={i} className="px-5 py-2 text-xs text-red-400 bg-red-500/10 border-y border-red-500/20">
+                    Debug: Empty Message (Finished). Check console logs.
+                  </div>
+                );
+              }
 
               return (
                 <div key={i} className={`flex gap-4 ${msg.role === "assistant" ? "bg-slate-900/30 -mx-5 px-5 py-4 border-y border-slate-900/50" : ""}`}>
@@ -916,7 +1000,15 @@ function SidePanelContent() {
               <span className={`text-xs font-medium transition-colors ${!isDeepMode ? "text-slate-300" : "text-slate-600"}`}>Standard</span>
               <Switch
                 checked={isDeepMode}
-                onCheckedChange={setIsDeepMode}
+                onCheckedChange={(checked) => {
+                  console.log('[SidePanel] Deep Mode Toggle Clicked. Tier:', tier, 'Checked:', checked);
+                  if (tier === 'free' && checked) {
+                    console.log('[SidePanel] Blocking Deep Mode (Free Tier)');
+                    setShowUpgrade(true);
+                    return;
+                  }
+                  setIsDeepMode(checked);
+                }}
                 className="data-[state=checked]:bg-blue-600"
               />
               <span className={`text-xs font-medium transition-colors ${isDeepMode ? "text-blue-400" : "text-slate-600"}`}>Deep Mode</span>
@@ -980,7 +1072,9 @@ function SidePanelContent() {
 function SidePanel() {
   return (
     <AuthProvider>
-      <SidePanelContent />
+      <GlobalErrorBoundary>
+        <SidePanelContent />
+      </GlobalErrorBoundary>
     </AuthProvider>
   );
 }

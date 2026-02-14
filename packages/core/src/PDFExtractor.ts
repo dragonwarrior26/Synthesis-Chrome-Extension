@@ -51,9 +51,11 @@ export const PDFExtractor = {
     /**
      * Fetches the PDF and extracts text from all pages.
      */
-    async extract(url: string, maxPages = 20): Promise<{ title: string; content: string } | null> {
+    async extract(source: string | Uint8Array, maxPages = 20): Promise<{ title: string; content: string } | null> {
         try {
-            const loadingTask = pdfjsLib.getDocument(url);
+            const loadingTask = (typeof source === 'string')
+                ? pdfjsLib.getDocument(source)
+                : pdfjsLib.getDocument({ data: source });
             const pdf = await loadingTask.promise;
 
             let fullText = '';
@@ -78,8 +80,12 @@ export const PDFExtractor = {
                     title = (metadata.info as any).Title;
                 } else {
                     // Fallback to filename
-                    const filename = url.split('/').pop()?.split('#')[0].split('?')[0];
-                    if (filename) title = decodeURIComponent(filename);
+                    let filename = 'PDF Document';
+                    if (typeof source === 'string') {
+                        const parts = source.split('/').pop()?.split('#')[0].split('?')[0];
+                        if (parts) filename = decodeURIComponent(parts);
+                    }
+                    title = filename;
                 }
             } catch (e) {
                 // Ignore metadata errors

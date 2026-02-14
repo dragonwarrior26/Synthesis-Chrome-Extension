@@ -162,42 +162,80 @@ export const YouTubeExtractor = {
             }
 
             // Fetch the actual captions
-            const captionUrl = captionTrack.baseUrl + '&fmt=json3';
-            console.log(`[YouTubeExtractor] Fetching captions from: ${captionUrl.substring(0, 100)}...`);
+            // Try formatting as JSON3 first
+            let transcriptData = null;
+            let usedFormat = 'json3';
 
-            const captionResponse = await fetch(captionUrl);
-            if (!captionResponse.ok) {
-                console.error(`[YouTubeExtractor] Failed to fetch captions: ${captionResponse.status}`);
-                return null;
+            try {
+                const jsonUrl = captionTrack.baseUrl + '&fmt=json3';
+                console.log(`[YouTubeExtractor] Fetching JSON captions from: ${jsonUrl.substring(0, 100)}...`);
+                const response = await fetch(jsonUrl, { credentials: 'include' });
+                const text = await response.text();
+
+                if (response.ok && text.trim().length > 0) {
+                    transcriptData = JSON.parse(text);
+                }
+            } catch (e) {
+                console.warn('[YouTubeExtractor] JSON3 fetch failed, trying XML fallback', e);
             }
 
-            const captionData = await captionResponse.json();
-
-            if (!captionData.events || captionData.events.length === 0) {
-                console.log('[YouTubeExtractor] No caption events in response');
-                return null;
-            }
-
-            // Parse caption events
-            const segments: TranscriptSegment[] = [];
+            // Fallback to XML (srv1) if JSON failed
+            let segments: TranscriptSegment[] = [];
             let fullText = '';
 
-            for (const event of captionData.events) {
-                if (event.segs) {
-                    const text = event.segs.map((s: any) => s.utf8 || '').join('');
-                    if (text.trim()) {
+            if (transcriptData && transcriptData.events) {
+                // Process JSON
+                for (const event of transcriptData.events) {
+                    if (event.segs) {
+                        const text = event.segs.map((s: any) => s.utf8 || '').join('');
+                        if (text.trim()) {
+                            segments.push({
+                                text: text.trim(),
+                                offset: event.tStartMs || 0,
+                                duration: event.dDurationMs || 0
+                            });
+                            fullText += text + ' ';
+                        }
+                    }
+                }
+            } else {
+                console.log('[YouTubeExtractor] Trying XML parsing fallback...');
+                const xmlUrl = captionTrack.baseUrl + '&fmt=srv1';
+                const response = await fetch(xmlUrl, { credentials: 'include' });
+                const xml = await response.text();
+
+                if (!xml || xml.trim().length === 0) {
+                    console.error('[YouTubeExtractor] XML response empty');
+                    return null;
+                }
+
+                // Simple Regex Regex to parse <text start="X" dur="Y">Content</text>
+                const textRegex = /<text start="([\d.]+)" dur="([\d.]+)"[^>]*>([^<]+)<\/text>/g;
+                let match;
+
+                while ((match = textRegex.exec(xml)) !== null) {
+                    const start = parseFloat(match[1]) * 1000;
+                    const dur = parseFloat(match[2]) * 1000;
+                    const content = match[3]
+                        .replace(/&amp;/g, '&')
+                        .replace(/&lt;/g, '<')
+                        .replace(/&gt;/g, '>')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'");
+
+                    if (content.trim()) {
                         segments.push({
-                            text: text.trim(),
-                            offset: event.tStartMs || 0,
-                            duration: event.dDurationMs || 0
+                            text: content.trim(),
+                            offset: start,
+                            duration: dur
                         });
-                        fullText += text + ' ';
+                        fullText += content + ' ';
                     }
                 }
             }
 
             if (segments.length === 0) {
-                console.log('[YouTubeExtractor] No valid caption segments found');
+                console.log('[YouTubeExtractor] No valid caption segments found (JSON or XML)');
                 return null;
             }
 

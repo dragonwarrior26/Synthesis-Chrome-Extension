@@ -1,4 +1,4 @@
-import { ContentExtractor, type ExtensionMessage } from '@synthesis/core'
+import { ContentExtractor, PDFExtractor, type ExtensionMessage } from '@synthesis/core'
 
 console.log('Synthesis content script loaded')
 
@@ -14,6 +14,76 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage | any, _sender, 
 
 async function handleMessage(message: any): Promise<any> {
     if (message.type === 'EXTRACT_CONTENT') {
+        // SPECIAL HANDLING FOR YOUTUBE: Try to get transcript first
+        if (window.location.hostname.includes('youtube.com') && window.location.pathname.startsWith('/watch')) {
+            console.log('[ContentScript] YouTube detected during generic extraction, attempting captions...');
+            try {
+                const captionResult = await extractYouTubeCaptions();
+                if (captionResult && captionResult.transcript) {
+                    console.log('[ContentScript] Successfully upgraded generic extraction to transcript');
+                    return {
+                        type: 'CONTENT_EXTRACTED',
+                        payload: {
+                            title: document.title.replace(' - YouTube', ''),
+                            content: captionResult.transcript,
+                            textContent: captionResult.transcript,
+                            length: captionResult.transcript.length,
+                            url: window.location.href,
+                            siteName: 'YouTube',
+                            excerpt: captionResult.transcript.substring(0, 200) + '...',
+                            byline: document.querySelector('#owner-name a')?.textContent || 'YouTube Channel'
+                        }
+                    };
+                }
+            } catch (e) {
+                console.warn('[ContentScript] Failed to upgrade YouTube extraction:', e);
+                // Fall through to generic extractor but add a warning flag
+                const extracted = await ContentExtractor.extract(document, window.location.href);
+                if (extracted) {
+                    extracted.content = `[SYSTEM MESSAGE: Video transcript could not be extracted. Summary is based on video description and metadata only.]\n\n${extracted.content}`;
+                    return { type: 'CONTENT_EXTRACTED', payload: extracted };
+                }
+            }
+        }
+
+        // SPECIAL HANDLING FOR PDF (if browser handles it via built-in viewer)
+        // Note: Built-in viewer often blocks content scripts, but for some configurations it works.
+        const isPdf = document.contentType === 'application/pdf' || window.location.href.toLowerCase().endsWith('.pdf');
+
+        if (isPdf) {
+            console.log('[ContentScript] PDF detected. Attempting extraction via PDFExtractor...');
+            showDebugToast('PDF Detected. Extracting...', 'blue');
+            // We need to fetch the blob or use the URL
+            // If we are on the page, we can try to fetch the URL to getting bytes
+            try {
+                const response = await fetch(window.location.href);
+                const buffer = await response.arrayBuffer();
+                const u8 = new Uint8Array(buffer);
+
+                // Static import used (PDFExtractor imported at top)
+
+                const pdfData = await PDFExtractor.extract(u8);
+                if (pdfData) {
+                    showDebugToast('PDF Extraction Success!', 'green');
+                    return {
+                        type: 'CONTENT_EXTRACTED',
+                        payload: {
+                            title: pdfData.title || document.title,
+                            content: pdfData.content,
+                            textContent: pdfData.content,
+                            length: pdfData.content.length,
+                            url: window.location.href,
+                            siteName: 'PDF Document',
+                            excerpt: pdfData.content.substring(0, 200) + '...'
+                        }
+                    };
+                }
+            } catch (e) {
+                console.error('[ContentScript] PDF extraction failed in content script:', e);
+                showDebugToast('PDF Extraction Failed', 'orange');
+            }
+        }
+
         console.log('Extracting content...');
         const extracted = await ContentExtractor.extract(document, window.location.href);
         if (extracted) {
@@ -99,57 +169,179 @@ async function extractYouTubeCaptions(): Promise<{ transcript: string; segments:
             return null;
         }
 
-        // Fetch captions in JSON format
+        // Fetch captions in JSON format with credentials
         const captionUrl = track.baseUrl + '&fmt=json3';
         console.log(`[ContentScript] Fetching captions from: ${captionUrl.substring(0, 80)}...`);
 
-        const response = await fetch(captionUrl);
-        if (!response.ok) {
-            console.error(`[ContentScript] Caption fetch failed: ${response.status}`);
-            return null;
-        }
+        // VISUAL DEBUG: Show user what's happening
+        showDebugToast('Attempting API Fetch...', 'blue');
 
-        const data = await response.json();
+        try {
+            const response = await fetch(captionUrl, { credentials: 'include' });
+            if (!response.ok) {
+                console.error(`[ContentScript] Caption fetch failed: ${response.status}, trying UI fallback...`);
+                showDebugToast('API Failed. Trying UI Fallback...', 'orange');
+                return await scrapeTranscriptFromUI();
+            }
 
-        if (!data.events || data.events.length === 0) {
-            console.log('[ContentScript] No events in caption response');
-            return null;
-        }
+            const data = await response.json();
 
-        // Parse caption events
-        const segments: any[] = [];
-        let fullText = '';
+            // Check if we got valid events
+            if (!data.events || data.events.length === 0) {
+                console.log('[ContentScript] No events in caption response (empty transcript), trying UI fallback...');
+                showDebugToast('Empty Transcript. Trying UI Fallback...', 'orange');
+                return await scrapeTranscriptFromUI();
+            }
 
-        for (const event of data.events) {
-            if (event.segs) {
-                const text = event.segs.map((s: any) => s.utf8 || '').join('');
-                if (text.trim()) {
-                    segments.push({
-                        text: text.trim(),
-                        offset: event.tStartMs || 0,
-                        duration: event.dDurationMs || 0
-                    });
-                    fullText += text + ' ';
+            showDebugToast('API Success!', 'green');
+
+            // Parse caption events
+            const segments: any[] = [];
+            let fullText = '';
+
+            for (const event of data.events) {
+                if (event.segs) {
+                    const text = event.segs.map((s: any) => s.utf8 || '').join('');
+                    if (text.trim()) {
+                        segments.push({
+                            text: text.trim(),
+                            offset: event.tStartMs || 0,
+                            duration: event.dDurationMs || 0
+                        });
+                        fullText += text + ' ';
+                    }
                 }
+            }
+
+            if (segments.length === 0) {
+                console.log('[ContentScript] No valid segments parsed');
+                return null;
+            }
+
+            console.log(`[ContentScript] Successfully extracted ${segments.length} caption segments`);
+
+            return {
+                transcript: fullText.replace(/\s+/g, ' ').trim(),
+                segments
+            };
+
+        } catch (error) {
+            console.error('[ContentScript] Caption extraction error:', error);
+            showDebugToast('API Error. Trying UI Fallback...', 'orange');
+            return await scrapeTranscriptFromUI();
+        }
+    } catch (error) {
+        console.error('[ContentScript] Fatal Caption extraction error:', error);
+        return null;
+    }
+}
+
+/**
+ * Fallback method: Scrape transcript by interacting with the UI.
+ * This is "Hybrid Scraper v3" - Verified internally on 2026-02-01.
+ */
+async function scrapeTranscriptFromUI(): Promise<{ transcript: string; segments: any[] } | null> {
+    console.log('[ContentScript] Attempting UI-based transcript extraction (Hybrid v3)...');
+
+    // 1. FAST CHECK: Is it already open?
+    let segments = Array.from(document.querySelectorAll('ytd-transcript-segment-renderer'));
+    if (segments.length > 0) {
+        console.log('[ContentScript] Transcript sidebar already open. Extracting immediately.');
+        return extractTextFromSegments(segments);
+    }
+
+    // Helper: Find transcript button with multiple selectors
+    const findTranscriptButton = () => {
+        // 1. Text Content
+        const buttons = Array.from(document.querySelectorAll('button, tp-yt-paper-button'));
+        const textBtn = buttons.find(b => b.textContent && b.textContent.toLowerCase().includes('show transcript'));
+        if (textBtn) return textBtn as HTMLElement;
+
+        // 2. Aria Label
+        const ariaBtn = document.querySelector('[aria-label*="Show transcript"]');
+        if (ariaBtn) return ariaBtn as HTMLElement;
+
+        // 3. Renderer Structure
+        const rendererBtn = document.querySelector('ytd-video-description-transcript-section-renderer button');
+        if (rendererBtn) return rendererBtn as HTMLElement;
+
+        return null;
+    };
+
+    // 2. Look for button immediately
+    let transcriptButton = findTranscriptButton();
+
+    // 3. If not found, Expand Description (CRITICAL STEP)
+    if (!transcriptButton) {
+        console.log('[ContentScript] Button not found. Attempting expansion...');
+        const expanders = [
+            '#expand',
+            '#description-inline-expander #expand',
+            '#description-inline-expander .more-button',
+            'ytd-text-inline-expander #expand'
+        ];
+
+        let expanded = false;
+        for (const selector of expanders) {
+            const el = document.querySelector(selector) as HTMLElement;
+            if (el && el.offsetParent !== null) { // Check visibility
+                console.log(`[ContentScript] Clicking expander: ${selector}`);
+                el.click();
+                expanded = true;
+                break;
             }
         }
 
-        if (segments.length === 0) {
-            console.log('[ContentScript] No valid segments parsed');
-            return null;
+        if (expanded) {
+            // Wait for DOM
+            await new Promise(r => setTimeout(r, 1000));
+            transcriptButton = findTranscriptButton();
         }
+    }
 
-        console.log(`[ContentScript] Successfully extracted ${segments.length} caption segments`);
+    // 4. Click & Wait
+    if (transcriptButton) {
+        console.log('[ContentScript] Clicking "Show transcript" button...');
+        transcriptButton.click();
 
-        return {
-            transcript: fullText.replace(/\s+/g, ' ').trim(),
-            segments
-        };
-
-    } catch (error) {
-        console.error('[ContentScript] Caption extraction error:', error);
+        // Wait for segments to appear (up to 4s)
+        for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 200));
+            segments = Array.from(document.querySelectorAll('ytd-transcript-segment-renderer'));
+            if (segments.length > 0) break;
+        }
+    } else {
+        console.warn('[ContentScript] Could not find "Show transcript" button even after expansion.');
         return null;
     }
+
+    if (segments.length === 0) {
+        console.error('[ContentScript] Sidebar opened but no segments found.');
+        return null;
+    }
+
+    return extractTextFromSegments(segments);
+}
+
+function extractTextFromSegments(segments: Element[]) {
+    console.log(`[ContentScript] Extracting text from ${segments.length} segments`);
+
+    const parsedSegments = segments.map(segment => {
+        const timeEl = segment.querySelector('.segment-timestamp');
+        const textEl = segment.querySelector('.segment-text') || segment.querySelector('.segment-text yt-formatted-string');
+
+        return {
+            text: textEl?.textContent?.trim() || '',
+            timestamp: timeEl?.textContent?.trim() || '',
+        };
+    }).filter(s => s.text);
+
+    const fullText = parsedSegments.map(s => s.text).join(' ');
+
+    return {
+        transcript: fullText,
+        segments: parsedSegments
+    };
 }
 
 /**
@@ -307,4 +499,36 @@ async function captureYouTubeAudio(maxDurationSeconds: number = 300): Promise<{ 
     })
 }
 
+// Visual Debug Helper — only shows DOM toasts in dev mode
+function showDebugToast(message: string, color: string = 'blue') {
+    // Always log to console for debugging
+    console.log(`[Synthesis] ${message}`);
 
+    // Only inject visible DOM toasts in development
+    if (!import.meta.env.DEV) return;
+
+    let toast = document.getElementById('synthesis-debug-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'synthesis-debug-toast';
+        toast.style.position = 'fixed';
+        toast.style.top = '10px';
+        toast.style.right = '10px';
+        toast.style.padding = '10px 20px';
+        toast.style.borderRadius = '5px';
+        toast.style.color = 'white';
+        toast.style.fontFamily = 'monospace';
+        toast.style.zIndex = '999999';
+        toast.style.boxShadow = '0 2px 10px rgba(0,0,0,0.5)';
+        toast.style.transition = 'all 0.3s ease';
+        document.body.appendChild(toast);
+    }
+    toast.style.backgroundColor = color === 'green' ? '#10B981' : color === 'orange' ? '#F59E0B' : '#3B82F6';
+    toast.textContent = `[Synthesis] ${message}`;
+
+    // Auto remove after 5s
+    setTimeout(() => {
+        if (toast) toast.style.opacity = '0';
+        setTimeout(() => toast?.remove(), 500);
+    }, 5000);
+}

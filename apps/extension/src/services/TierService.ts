@@ -1,66 +1,110 @@
+import { setTier } from '../config/features';
 import { supabase } from '../lib/supabase';
-import { setTier, type SynthesisTier } from '../config/features';
 
 export type UserTier = 'free' | 'pro' | 'byok';
 
-interface UserProfile {
-    id: string;
-    subscription_tier: SynthesisTier;
-    email?: string;
-}
-
 /**
  * TierService - Runtime tier detection for Synthesis
- * 
- * Tier Hierarchy:
- * 1. BYOK (Bring Your Own Key) - User has valid Gemini API key → highest limits
- * 2. Pro - Signed in with active subscription → full features
- * 3. Free - No login required → limited features
  */
 export class TierService {
+    private static apiKeyStorageKey = 'gemini_api_key';
+    // cachedTier is used to store the last detected tier for performance
     private static cachedTier: UserTier = 'free';
-    private static apiKeyStorageKey = 'synthesis_gemini_api_key';
 
     /**
-     * Get the current user's tier based on:
-     * 1. API key presence (BYOK) - Highest priority
-     * 2. Database subscription_tier (Pro/Free)
+     * Get current effective tier
      */
     static async getCurrentTier(): Promise<UserTier> {
-        // Check for BYOK first (highest priority)
-        if (await this.hasValidApiKey()) {
-            this.cachedTier = 'byok';
-            return 'byok';
-        }
+        // Enforce 5s timeout for tier detection to prevent blocking the UI
+        const detectionPromise = (async () => {
+            try {
+                // 1. FAST PATH: Check for BYOK first (no network calls, instant)
+                if (await this.hasValidApiKey()) {
+                    this.cachedTier = 'byok';
+                    setTier('pro'); // BYOK users get pro-level features
+                    return 'byok';
+                }
 
-        // Check for Admin/Internal Override
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.email === 'aayush_sharma@synthesisext.com') {
-            // console.log('[TierService] Admin Access Granted');
-            this.cachedTier = 'pro';
-            setTier('pro');
-            return 'pro';
-        }
+                // 2. CHECK DB: If user is logged in, check profiles
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) {
+                    const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('subscription_tier')
+                        .eq('id', session.user.id)
+                        .single();
 
-        // Check database for subscription tier
-        const profile = await this.fetchUserProfile();
-        if (profile?.subscription_tier === 'pro') {
-            this.cachedTier = 'pro';
-            setTier('pro');
-            return 'pro';
-        }
+                    if (profile?.subscription_tier === 'pro') {
+                        this.cachedTier = 'pro';
+                        setTier('pro');
+                        return 'pro';
+                    }
+                }
 
-        // Default to free
-        this.cachedTier = 'free';
-        setTier('free');
-        return 'free';
+                // 3. DEFAULT: Free
+                this.cachedTier = 'free';
+                setTier('free');
+                return 'free';
+            } catch (error) {
+                console.warn('[TierService] Error detecting tier, defaulting to free:', error);
+                this.cachedTier = 'free';
+                setTier('free');
+                return 'free';
+            }
+        })();
+
+        // Race against 5s timeout
+        const timeoutPromise = new Promise<UserTier>((resolve) => {
+            setTimeout(() => {
+                console.warn('[TierService] Tier detection timed out (5s), defaulting to free');
+                resolve('free');
+            }, 5000);
+        });
+
+        return Promise.race([detectionPromise, timeoutPromise]);
     }
 
     /**
      * Quick sync of tier - called after login
      */
     static async syncTierFromDB(): Promise<UserTier> {
-        return this.getCurrentTier();
+        try {
+            // 1. Check for BYOK first (highest priority)
+            if (await this.hasValidApiKey()) {
+                this.cachedTier = 'byok';
+                setTier('pro');
+                return 'byok';
+            }
+
+            // 2. Check Supabase for subscription tier
+            const { data: { user } } = await supabase.auth.getUser();
+
+            if (user) {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('subscription_tier')
+                    .eq('id', user.id)
+                    .single();
+
+                if (profile?.subscription_tier === 'pro') {
+                    console.log('[TierService] User has PRO tier');
+                    this.cachedTier = 'pro';
+                    setTier('pro');
+                    return 'pro';
+                }
+            }
+
+            // 3. Default to free
+            console.log('[TierService] User is on FREE tier');
+            this.cachedTier = 'free';
+            setTier('free');
+            return 'free';
+
+        } catch (error) {
+            console.error('[TierService] Sync failed:', error);
+            // Fallback to cached or free
+            return this.cachedTier;
+        }
     }
 
     /**
@@ -69,90 +113,45 @@ export class TierService {
     static async hasValidApiKey(): Promise<boolean> {
         try {
             const result = await chrome.storage.local.get(this.apiKeyStorageKey);
-            const apiKey = result[this.apiKeyStorageKey];
-            return !!(apiKey && typeof apiKey === 'string' && apiKey.length > 20);
-        } catch {
+            const apiKey = result[this.apiKeyStorageKey] as string | undefined;
+            return !!apiKey && apiKey.length > 0;
+        } catch (e) {
             return false;
         }
     }
 
     /**
-     * Get the stored API key (for BYOK users)
+     * Get the stored API key
      */
     static async getStoredApiKey(): Promise<string | null> {
         try {
             const result = await chrome.storage.local.get(this.apiKeyStorageKey);
-            const key = result[this.apiKeyStorageKey];
-            return typeof key === 'string' ? key : null;
-        } catch {
+            return (result[this.apiKeyStorageKey] as string) || null;
+        } catch (e) {
             return null;
         }
     }
 
     /**
-     * Store API key (for BYOK users)
+     * Store the API key
      */
     static async setApiKey(apiKey: string): Promise<void> {
         await chrome.storage.local.set({ [this.apiKeyStorageKey]: apiKey });
-        // Refresh tier
-        await this.getCurrentTier();
+        // Invalidate cache to force re-check
+        this.cachedTier = 'byok';
+        setTier('pro');
     }
 
     /**
-     * Remove stored API key
+     * Clear the stored API key
      */
-    static async clearApiKey(): Promise<void> {
+    static async clearStoredApiKey(): Promise<void> {
         await chrome.storage.local.remove(this.apiKeyStorageKey);
-        await this.getCurrentTier();
+        this.cachedTier = 'free'; // Default back to free
+        setTier('free');
     }
 
-    /**
-     * Fetch user profile from Supabase
-     */
-    private static async fetchUserProfile(): Promise<UserProfile | null> {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return null;
-
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('id, subscription_tier, email')
-                .eq('id', user.id)
-                .single();
-
-            if (error) {
-                console.error('[TierService] Profile fetch error:', error);
-                return null;
-            }
-
-            return data;
-        } catch (error) {
-            console.error('[TierService] Error fetching profile:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Get cached tier (for synchronous access)
-     */
     static getCachedTier(): UserTier {
         return this.cachedTier;
-    }
-
-    /**
-     * Check if current tier allows a specific feature
-     */
-    static canAccessFeature(_feature: 'youtubeStt' | 'visionMode' | 'deepMode' | 'googleSearch' | 'cloudSync'): boolean {
-        const tier = this.cachedTier;
-        // BYOK and Pro can access all features
-        return tier === 'byok' || tier === 'pro';
-    }
-
-    /**
-     * Check if user is signed in (for cloud sync, etc.)
-     */
-    static async isSignedIn(): Promise<boolean> {
-        const { data: { user } } = await supabase.auth.getUser();
-        return !!user;
     }
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { type ExtractedContent, type ExtractContentMessage } from '@synthesis/core'
+import { type ExtractedContent, type ExtractContentMessage, YouTubeExtractor, PDFExtractor } from '@synthesis/core'
 
 export interface TabData {
     id: number
@@ -48,32 +48,101 @@ export function useTabManager() {
             const tab = activeTabs.find(t => t.id === tabId);
             if (!tab) return;
 
-            // PDF Handling (Local Extraction in Side Panel)
-            if (tab.url.toLowerCase().endsWith('.pdf')) {
-                // Dynamic Import of Core to access PDFExtractor
-                // Note: We need to import PDFExtractor. ContentExtractor is already used in content script.
-                // We use the same Core package.
-                const { PDFExtractor } = await import('@synthesis/core');
-                console.log(`Extracting PDF from ${tab.url}`);
-                const pdfData = await PDFExtractor.extract(tab.url);
+            // YouTube Handling (Direct Library Extraction)
+            if (YouTubeExtractor.isYouTube(tab.url)) {
+                console.log(`[useTabManager] Detected YouTube URL: ${tab.url}`);
+                const videoData = await YouTubeExtractor.getVideoInfo(tab.url);
 
-                if (pdfData) {
+                if (videoData && videoData.transcript) {
+                    console.log(`[useTabManager] Successfully extracted transcript via library`);
                     setExtractedData((prev) => ({
                         ...prev,
                         [tabId]: {
-                            title: pdfData.title,
-                            content: pdfData.content,
-                            textContent: pdfData.content,
-                            length: pdfData.content.length,
-                            excerpt: pdfData.content.substring(0, 200) + '...',
-                            byline: null,
-                            siteName: 'PDF Document'
+                            title: videoData.title || tab.title || "YouTube Video",
+                            content: videoData.transcript!,
+                            textContent: videoData.transcript!,
+                            length: videoData.transcript!.length,
+                            excerpt: videoData.transcript!.substring(0, 200) + '...',
+                            byline: videoData.channelName || 'YouTube',
+                            siteName: 'YouTube',
+                            url: tab.url
                         },
                     }));
+                    return; // Skip content script fallback
                 } else {
-                    console.error('PDF Extraction returned null');
+                    console.log(`[useTabManager] No transcript found via library, falling back to content script`);
                 }
-                return; // Skip content script message
+            }
+
+            // PDF Handling (Local Extraction in Side Panel)
+            // Check based on URL path to ignore query params/fragments, but fallback to simple check
+            const isPdfUrl = (url: string) => {
+                console.log(`[useTabManager] Debugging PDF Check for: ${url}`);
+                try {
+                    const u = new URL(url);
+                    const path = u.pathname.toLowerCase();
+                    const result = path.endsWith('.pdf') || (u.hostname.includes('arxiv.org') && path.startsWith('/pdf/'));
+                    console.log(`[useTabManager] Check Result: ${result} (path=${path})`);
+                    return result;
+                } catch (e) {
+                    console.log(`[useTabManager] Check Error`, e);
+                    return url.toLowerCase().endsWith('.pdf');
+                }
+            };
+
+            if (isPdfUrl(tab.url)) {
+                console.log(`[useTabManager] Detected PDF URL: ${tab.url} - Entering execution block`);
+
+                try {
+                    // Fetch via background to bypass CORS in sidepanel
+                    const response = await chrome.runtime.sendMessage({
+                        type: 'FETCH_PDF_BINARY',
+                        url: tab.url
+                    }).catch(e => {
+                        console.error("[useTabManager] Initial Background connection failed:", e);
+                        throw e;
+                    });
+
+                    if (response.success && response.data) {
+                        // Convert base64 back to Uint8Array
+                        const binaryString = atob(response.data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let i = 0; i < len; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+
+                        console.log(`[useTabManager] Fetched PDF data via background. Size: ${len}`);
+                        const pdfData = await PDFExtractor.extract(bytes);
+
+                        if (pdfData) {
+                            console.log(`[useTabManager] Successfully extracted PDF: ${pdfData.title}`);
+                            setExtractedData((prev) => ({
+                                ...prev,
+                                [tabId]: {
+                                    title: pdfData.title || tab.title || "PDF Document",
+                                    content: pdfData.content,
+                                    textContent: pdfData.content,
+                                    length: pdfData.content.length,
+                                    excerpt: pdfData.content.substring(0, 200) + '...',
+                                    byline: null,
+                                    siteName: 'PDF Document',
+                                    url: tab.url
+                                },
+                            }));
+                            return; // Success! Stop here.
+                        } else {
+                            console.error('[useTabManager] PDF Extraction returned null');
+                        }
+                    } else {
+                        console.error('[useTabManager] Background PDF fetch failed:', response.error);
+                    }
+                } catch (err) {
+                    console.error('[useTabManager] Error extracting PDF:', err);
+                }
+
+                console.log('[useTabManager] Sidepanel PDF extraction failed. Falling back to Content Script...');
+                // Fall through to content script extraction
             }
 
             const message: ExtractContentMessage = { type: 'EXTRACT_CONTENT' }
